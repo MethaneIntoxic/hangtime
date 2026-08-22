@@ -1,8 +1,6 @@
 name: Production availability smoke
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:

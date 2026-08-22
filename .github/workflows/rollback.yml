@@ -15,6 +15,11 @@ on:
         description: Confirm the current Turso schema is backward-compatible with this code
         required: true
         type: boolean
+      confirm_free_tier:
+        description: Confirm this rollback is intentionally using the configured free-tier accounts
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: hangtime-production
@@ -25,7 +30,7 @@ permissions:
 
 jobs:
   rollback:
-    if: inputs.database_compatible == true
+    if: inputs.database_compatible == true && inputs.confirm_free_tier == true && vars.FREE_TIER_DEPLOYMENTS_ENABLED == 'true'
     environment: production
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -42,6 +47,11 @@ jobs:
           node-version: 24.10.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Validate exact rollback metadata
+        env:
+          SOURCE_SHA: ${{ inputs.expected_sha }}
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+        run: pnpm release:metadata
       - name: Validate rollback target and revision
         shell: bash
         env:

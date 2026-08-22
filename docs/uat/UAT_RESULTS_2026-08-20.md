@@ -23,7 +23,7 @@ The local MVP now uses Hangtime branding, MapLibre GL JS with the keyless OpenFr
 
 The repository is locally verified but is not production-releasable yet:
 
-- A local `main` Git repository is initialized, but there is no commit or remote yet, so GitHub Actions, GHCR attestations, Fly staging, promotion and rollback have not run remotely.
+- A local `main` Git repository is initialized, but there is no commit or remote yet, so GitHub Actions, Vercel staging/promotion, Turso migration, and rollback have not run remotely.
 - Production authentication is still a demo/local implementation.
 - Exact origins remain plaintext in SQLite; production promotion must stay disabled until encrypted durable storage is proven.
 - OneMap search/routing credentials are not configured, so transit remains a clearly disclosed local estimate.

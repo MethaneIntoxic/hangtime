@@ -44,7 +44,7 @@ Dataset: isolated seeded database for the authoritative automated run
 - CSRF/origin validation, rate limiting, concurrent invite/capacity tests, complete keyboard semantics, and full three-session voting remain open.
 - Development access logs include tokenized join paths. CI no longer uploads Playwright JSON artifacts, but token redaction for operational logs remains required.
 - Docker is unavailable locally, so the new exact-container runtime gate is syntax-reviewed but requires a real GitHub Actions run.
-- The directory still has no Git repository/remote, Fly apps, GHCR package, protected environments, or deployment history; workflows cannot be represented as executed until those external systems exist.
+- The directory still has no committed remote, Vercel project, Turso databases, protected environments, or deployment history; workflows cannot be represented as executed until those external systems exist.
 
 ## CI/CD changes verified locally
 

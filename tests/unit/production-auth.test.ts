@@ -176,6 +176,45 @@ describe("authentication request protections", () => {
     database.close();
   });
 
+  it("isolates rate-limit buckets by scope, value, and window", async () => {
+    const database = await temporaryDatabase();
+    const base = {
+      value: "person@example.com",
+      limit: 1,
+      windowSeconds: 60,
+      secret: "test-secret-at-least-thirty-two-characters",
+      nowMs: Date.UTC(2026, 7, 20, 10, 0, 0),
+    };
+
+    expect(await consumeRateLimit(database, { ...base, scope: "auth-email" })).toBe(true);
+    expect(await consumeRateLimit(database, { ...base, scope: "auth-email" })).toBe(false);
+    // A different scope must not inherit the email bucket.
+    expect(await consumeRateLimit(database, { ...base, scope: "auth-client" })).toBe(true);
+    // A different identity must not inherit either bucket.
+    expect(await consumeRateLimit(database, { ...base, scope: "auth-email", value: "other@example.com" })).toBe(true);
+    // Once the fixed window rolls over, the original identity can try again.
+    expect(await consumeRateLimit(database, {
+      ...base,
+      scope: "auth-email",
+      nowMs: base.nowMs + 60_000,
+    })).toBe(true);
+    database.close();
+  });
+
+  it("expires an opaque session at the strict TTL boundary", async () => {
+    const database = await temporaryDatabase();
+    const sessionNowMs = Date.UTC(2026, 7, 20, 10, 0, 0);
+    const issued = await issueMagicLink("boundary@example.com", database, sessionNowMs);
+    const consumed = await consumeMagicLink(issued.token, database, sessionNowMs + 1_000);
+    expect(consumed.ok).toBe(true);
+    if (!consumed.ok) return;
+
+    const expiresAt = Date.parse(consumed.session.expiresAt);
+    expect(await productionSessionUserId(consumed.session.token, database, expiresAt - 1)).toBe(consumed.userId);
+    expect(await productionSessionUserId(consumed.session.token, database, expiresAt)).toBeNull();
+    database.close();
+  });
+
   it("uses a secure host-only cookie in production", () => {
     const production = { NODE_ENV: "production" } as NodeJS.ProcessEnv;
     expect(sessionCookieName(production)).toBe("__Host-hangtime_session");

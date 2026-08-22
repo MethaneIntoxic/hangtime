@@ -14,12 +14,21 @@
 - [ ] Configure matching, environment-scoped Vercel variables; mark secrets Sensitive.
 - [ ] Confirm Preview and Production database URLs, tokens, keyrings, auth secrets, and email identities differ.
 - [ ] Confirm no production secret is available to pull-request workflows.
+- [ ] Leave `FREE_TIER_DEPLOYMENTS_ENABLED` unset unless an intentional
+      free-tier release window is open; set it to `true` only for that window.
+- [ ] Confirm no GitHub Actions schedule is enabled and that manual health
+      checks are acceptable for the current zero-cost operating mode.
 
 ## First release
 
-- [ ] Run CI on the exact main SHA and retain the workflow URL.
+- [ ] Run `pnpm ci:fast` and `pnpm ci:security` locally on the exact main SHA;
+      retain the workflow URL only if hosted Actions actually starts a runner.
+- [ ] If Actions is blocked before runner start by account billing/spending
+      restrictions, record remote validation as not executed; do not change
+      billing settings or claim the local result as remote evidence.
 - [ ] Run the trusted Preview workflow; exercise real sign-in, create/join/vote/confirm, map/list fallback, installability, and encrypted location verification.
-- [ ] Run the protected Production workflow with the verified SHA and Preview URL.
+- [ ] Set `FREE_TIER_DEPLOYMENTS_ENABLED=true`, then run the protected Production
+      workflow with `confirm_free_tier=true`, the verified SHA, and Preview URL.
 - [ ] Confirm `/api/health` reports that SHA, demo switching returns 404, authenticated APIs are no-store, and anonymous private APIs return 401.
 - [ ] Record the Vercel deployment ID/URL, Turso database/schema, active location-key version, and approver without recording secrets or private data.
 

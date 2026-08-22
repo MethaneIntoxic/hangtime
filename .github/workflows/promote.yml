@@ -11,6 +11,11 @@ on:
         description: Trusted preview URL that passed smoke testing
         required: true
         type: string
+      confirm_free_tier:
+        description: Confirm this deployment is intentionally using the configured free-tier accounts
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: hangtime-production
@@ -27,6 +32,7 @@ env:
 
 jobs:
   production:
+    if: inputs.confirm_free_tier == true && vars.FREE_TIER_DEPLOYMENTS_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     environment: production
@@ -63,6 +69,11 @@ jobs:
           node-version: 24.10.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Validate exact source metadata
+        env:
+          SOURCE_SHA: ${{ steps.inputs.outputs.sha }}
+          RELEASE_CHANNEL: production
+        run: pnpm release:metadata
       - name: Recheck trusted preview revision
         env:
           SOURCE_SHA: ${{ steps.inputs.outputs.sha }}
@@ -116,3 +127,9 @@ jobs:
           echo "- Source: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "- Staged and verified: $STAGED_URL" >> "$GITHUB_STEP_SUMMARY"
           echo "- Production: $PRODUCTION_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Record immutable production release metadata
+        env:
+          SOURCE_SHA: ${{ steps.inputs.outputs.sha }}
+          RELEASE_CHANNEL: production
+          DEPLOYMENT_URL: ${{ steps.staged.outputs.url }}
+        run: pnpm release:metadata

@@ -1,25 +1,25 @@
 # Hangtime delivery backlog
 
-Created from UAT run `UAT-2026-08-17-01` and architecture/security/UX review. Severity controls release disposition; priority controls execution order.
+Created from UAT runs `UAT-2026-08-17-01` through `UAT-2026-08-21` and architecture/security/UX review. Severity controls release disposition; priority controls execution order. Story-level acceptance and evidence ownership live in `docs/uat/UAT_PLAN.md`.
 
 ## Release view
 
-| Ticket | Severity | Priority | Owner | Release gate | Summary |
-|---|---:|---:|---|---|---|
-| DT-001 | S1 | P0 | Backend | Public beta | Replace demo identity with production email authentication |
-| DT-002 | S1 | P0 | Platform | Public beta | Durable database, migrations, backups, and encrypted precise location |
-| DT-003 | S1 | P0 | QA | Beta | True three-actor, single-plan end-to-end journey |
-| DT-004 | S1 | P0 | Full stack | Beta | Complete invitation acceptance and abuse cases |
-| DT-005 | S1 | P0 | Backend | Beta | Enforce readiness and invalidate stale recommendations |
-| DT-006 | S2 | P0 | Frontend | Beta | Keyboard semantics and automated accessibility checks |
-| DT-007 | S2 | P0 | Full stack | Beta | Deterministic request failure and recovery states |
-| DT-008 | S2 | P0 | Frontend | Beta | Resolve mobile sticky-action collision and installed-PWA UAT |
-| DT-009 | S2 | P1 | Product | Beta | Intentional companion selection and meal-aware time defaults |
-| DT-010 | S1 | P0 | Integrations | Public beta | Live Singapore venue/transit providers with provenance and quota handling |
-| DT-011 | S2 | P1 | Integrations | Public beta | Email/push delivery, retries, and notification preferences |
-| DT-012 | S2 | P1 | Full stack | Beta | Companion lifecycle, consent, favourites, and removal |
-| DT-013 | S2 | P1 | Full stack | Beta | Post-meal feedback timing, idempotency, and reporting |
-| DT-014 | S1 | P0 | Platform | Public beta | Production observability, abuse controls, CSP, and incident runbook |
+| Ticket | Severity | Priority | Owner | Release gate | UAT stories | Summary |
+|---|---:|---:|---|---|---|---|
+| DT-001 | S1 | P0 | Backend | Public beta | HT-US-801 | Provision and prove production email authentication |
+| DT-002 | S1 | P0 | Platform | Public beta | HT-US-802 | Turso migrations, backups, and encrypted precise location |
+| DT-003 | S1 | P0 | QA | Beta | HT-US-202, HT-US-301, HT-US-502, HT-US-503, HT-US-601, HT-US-602 | True three-actor, single-plan end-to-end journey |
+| DT-004 | S1 | P0 | Full stack | Beta | HT-US-301, HT-US-302 | Complete invitation acceptance and abuse cases |
+| DT-005 | S1 | P0 | Backend | Beta | HT-US-302, HT-US-401 | Enforce readiness and invalidate stale recommendations |
+| DT-006 | S2 | P0 | Frontend | Beta | HT-US-501, HT-US-502, HT-US-503, HT-US-804 | Keyboard semantics and automated accessibility checks |
+| DT-007 | S2 | P0 | Full stack | Beta | HT-US-401, HT-US-503, HT-US-601, HT-US-703, HT-US-805 | Deterministic request failure and recovery states |
+| DT-008 | S2 | P0 | Frontend | Beta | HT-US-102, HT-US-501, HT-US-803, HT-US-804 | Resolve mobile sticky-action collision and installed-PWA UAT |
+| DT-009 | S2 | P1 | Product | Beta | HT-US-202, HT-US-203 | Intentional companion selection and meal-aware time defaults |
+| DT-010 | S1 | P0 | Integrations | Public beta | HT-US-402, HT-US-501 | Live Singapore venue/transit providers with provenance and quota handling |
+| DT-011 | S2 | P1 | Integrations | Public beta | HT-US-702, HT-US-703, HT-US-806 | Honest notification boundary, delivery, retries, and preferences |
+| DT-012 | S2 | P1 | Full stack | Beta | HT-US-201, HT-US-202 | Companion lifecycle, consent, favourites, and removal |
+| DT-013 | S2 | P1 | Full stack | Beta | HT-US-703 | Post-meal feedback timing, idempotency, and reporting |
+| DT-014 | S1 | P0 | Platform | Public beta | HT-US-801, HT-US-802, HT-US-803, HT-US-805, HT-US-806 | Production observability, abuse controls, CSP, and incident runbook |
 
 ## Progress update — 2026-08-18
 
@@ -34,29 +34,30 @@ Created from UAT run `UAT-2026-08-17-01` and architecture/security/UX review. Se
 
 ## DT-001 — Production email authentication
 
-Problem: `getCurrentUserId` only understands the development demo cookie, so production has no usable sign-in flow.
+Problem: the production magic-link/session path is implemented in the repository, but account-owned Resend delivery, remote deployment evidence, and the complete live sign-in journey are not provisioned. The demo switcher remains local-only and is not evidence for beta.
 
 Acceptance criteria:
 
-- Email magic-link sign-in and sign-out work without the demo switcher.
+- Email magic-link sign-in and sign-out work without the demo switcher on the immutable Vercel Preview URL and the promoted Production URL.
 - Tokens are single-use, short-lived, hashed at rest, and bound to the intended email.
 - Session cookies are `HttpOnly`, `Secure`, `SameSite=Lax` or stricter, rotated after login, and expire.
 - Unauthenticated API responses are 401; unrelated authenticated diners receive 403 for plan resources.
 - Automated tests cover invalid, expired, reused, and cross-email links.
-- The executable production environment check, auth unit suite, and staging browser sign-in journey pass; promotion is still protected by the production environment approval.
+- The executable production environment check, auth unit suite, and staging browser sign-in journey pass; Resend sender/domain, rate-limit, bounce, and production-environment approval evidence are recorded without storing tokens or message bodies.
 
-## DT-002 — Durable storage and precise-location protection
+## DT-002 — Turso durable storage and precise-location protection
 
-Problem: SQLite currently writes to one process-local path and persists postal code/latitude/longitude in plaintext.
+Problem: local SQLite is appropriate only for development and legacy conversion tooling; Vercel must use remote Turso/libSQL with protected migrations. Precise origins must remain envelope-encrypted through migration, backup, restore, and key rotation.
 
 Acceptance criteria:
 
-- Managed Postgres is the production system of record; schema changes use committed forward migrations.
-- Postal codes and coordinates are envelope-encrypted with a managed key, never returned in participant/API payloads, and redacted from logs.
-- Backup, restore, retention, and key-rotation procedures are tested in staging with recorded recovery time.
+- Vercel Preview and Production each use a separate Turso database and scoped `TURSO_*` token; local `DATABASE_URL` is never used remotely.
+- Schema changes use committed forward migrations through `pnpm db:migrate:turso`; Vercel cold starts do not bootstrap or mutate schema.
+- Postal codes and coordinates are AES-256-GCM envelope-encrypted with an environment-specific keyring, never returned in participant/API payloads, and redacted from logs.
+- Turso PITR/restore, retention, and key-rotation procedures are tested in an isolated deployment with recorded recovery time and key version.
 - Deployments never run the destructive seed/reset commands against shared environments.
-- Production startup refuses SQLite and refuses to start without a current migration state.
-- Production startup and release gates run the location-encryption verifier, and a restore drill proves the backup contains no plaintext precise origins before promotion.
+- Vercel runtime validation refuses local SQLite and refuses to start without remote Turso credentials, a valid keyring, and production email controls.
+- Release gates run the location-encryption verifier, and a restore drill proves the database, retained backup, WAL/SHM export, logs, and browser payloads contain no plaintext precise origins before promotion.
 
 ## DT-003 — Three-actor single-plan browser UAT
 
@@ -150,12 +151,16 @@ Acceptance criteria:
 
 ## DT-011 — Notification delivery
 
+Current limit: profile email/push preferences and a `notification_outbox` schema table exist, and Resend is used for production magic-link authentication when configured. The current MVP does not yet prove a plan-event dispatcher, in-app notification API, confirmation/override email, reminder, bounce, or Web Push delivery. Until this ticket is complete, the in-app plan state is authoritative and a confirmation action must not be described as a delivered notification.
+
 Acceptance criteria:
 
-- In-app, email, and opt-in push events are idempotent and queued with bounded retries/dead-letter handling.
-- The organizer confirmation and override reason reach every participant through enabled channels.
-- Unsubscribe/preferences are honored, push permission denial is recoverable, and payloads omit precise origins and invite tokens.
-- Delivery metrics do not contain message bodies or personal location.
+- The channel contract is explicit: in-app state is always available; transactional email is the reliable default once Resend is provisioned; Web Push is optional and only after permission; SMS/phone notifications are out of scope.
+- Invitation, voting-open, confirmation/override, material-change, acknowledgement-conflict, and upcoming-meal events are idempotent and queued with bounded retries/dead-letter handling. Votes are not individually notified.
+- The organizer confirmation and any override reason reach every participant only when an enabled channel has a recorded delivery receipt; otherwise the UI reports an in-app-only result and offers a safe retry/status path.
+- Unsubscribe/preferences are honored, push permission denial is recoverable, and payloads omit precise origins, invite tokens, dietary notes, calendar details, and raw availability.
+- Delivery metrics contain event/template/channel/status and correlation identifiers only; they never contain message bodies or personal location.
+- Automated tests cover idempotency, safe payload redaction, retry/dead-letter transitions, and duplicate confirmation; manual staging evidence covers Resend delivery, bounce, unsubscribe, and at least one denied-push device.
 
 ## DT-012 — Companion lifecycle
 

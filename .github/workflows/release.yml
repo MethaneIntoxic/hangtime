@@ -23,6 +23,7 @@ env:
 jobs:
   deploy-preview:
     if: >-
+      vars.FREE_TIER_DEPLOYMENTS_ENABLED == 'true' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -40,6 +41,11 @@ jobs:
           node-version: 24.10.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Validate exact source metadata
+        env:
+          SOURCE_SHA: ${{ env.RELEASE_SHA }}
+          RELEASE_CHANNEL: preview
+        run: pnpm release:metadata
       - name: Require isolated preview credentials
         shell: bash
         env:
@@ -78,3 +84,9 @@ jobs:
           echo "### Trusted preview" >> "$GITHUB_STEP_SUMMARY"
           echo "- Source: $RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "- URL: $url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Record immutable preview release metadata
+        env:
+          SOURCE_SHA: ${{ env.RELEASE_SHA }}
+          RELEASE_CHANNEL: preview
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: pnpm release:metadata

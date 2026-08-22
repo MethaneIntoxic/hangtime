@@ -1,6 +1,6 @@
 # Hangtime — MVP Architecture and Implementation Blueprint
 
-**Status:** Scope locked for planning  
+**Status:** Scope locked; implementation baseline reconciled 2026-08-22
 **Market:** Singapore  
 **Product:** Couples-first meal planning PWA, supporting two or three participants  
 **Primary validation signals:** recommendation satisfaction and a second confirmed plan within 30 days
@@ -115,7 +115,7 @@ The release-governing behavior, visual, accessibility, privacy, and evidence req
 
 ## 4. Validated technical stack
 
-The repository is currently empty except for Git metadata. Build this as a modular monolith before considering separate services.
+The repository contains the implemented modular-monolith MVP. Local development uses an on-disk SQLite database; Vercel Preview and Production use separate remote Turso/libSQL databases. This document distinguishes that deployed baseline from future provider, queue, and calendar work so an aspirational contract is not mistaken for current evidence.
 
 | Layer | Selection | Reason |
 |---|---|---|
@@ -125,9 +125,9 @@ The repository is currently empty except for Git metadata. Build this as a modul
 | Language | TypeScript `5.9.3`, strict mode | Mature compiler line; avoid adopting TypeScript 7 on the MVP's first build. |
 | Styling | Tailwind CSS `4.3.3` plus accessible Radix-style primitives | Fast responsive UI with explicit accessible component behavior. |
 | Validation | Zod `4.4.3` | Shared API, form, queue-message, and environment validation. |
-| PWA | Serwist / `@serwist/next` `9.5.12` | Manifest, service worker, offline shell, and push handling. Sensitive routes remain network-only. |
-| Database/Auth | Supabase Postgres, Auth, RLS, Realtime | Free validation tier, email auth, relational state, policies, and small-group live updates. |
-| Jobs | Supabase Queues (`pgmq`), Cron, and Edge Functions | Durable recommendation/notification work without a continuously running server. |
+| PWA | Next.js custom service worker (`public/sw.js`) | Manifest, public offline shell, and cache policy. Sensitive routes/API responses remain network-only; Web Push is a future adapter, not current delivery evidence. |
+| Database/Auth | Turso/libSQL via `@libsql/client` `0.17.4` + Drizzle ORM `0.45.2`; local SQLite for development | Remote persistence with separate Preview/Production credentials, forward migrations, application-managed magic links/sessions, and server-side authorization. No hosted Postgres, realtime, or client-side row-policy dependency. |
+| Jobs | Synchronous recommendation route plus durable status/outbox tables in the current MVP | A durable worker, retries, and dead-letter processing remain planned; Vercel cold starts do not run migrations or background workers. |
 | Mapping | MapLibre GL JS `6.4.1` + OpenFreeMap Liberty style | Open-source WebGL renderer with a keyless OpenStreetMap-derived basemap; public service has no SLA, so the list remains usable without it. |
 | Venue data | Curated Singapore catalogue for prototype; provider interface later | Validates the planning and voting loop without a paid venue API. Ratings, prices and dietary claims must show provenance/confidence before public beta. |
 | SG geocoding | OneMap Search API | Singapore-focused address/postal-code resolution without using paid Google geocoding. |
@@ -135,7 +135,7 @@ The repository is currently empty except for Git metadata. Build this as a modul
 | Calendar | Google Calendar API with free/busy-only OAuth scope | Meets the privacy and MVP integration requirement. |
 | Email | Resend API with a verified sender domain | Production magic links require real delivery; test outboxes are forbidden in production. |
 | Push | Standards-based Web Push with VAPID | No per-message vendor fee; optional and permission-based. |
-| Hosting | Vercel Hobby in `sin1` with isolated Turso Free Preview and Production databases | Zero-cost personal tester hosting with remote libSQL persistence; upgrade Vercel before commercial use and reassess managed data hosting before public beta or horizontal scaling. |
+| Hosting | Vercel Hobby in `sin1` with isolated Turso Free Preview and Production databases | Zero-cost personal tester hosting with remote libSQL persistence; upgrade Vercel before commercial use and reassess hosting/database limits before public beta or horizontal scaling. |
 | Unit/integration tests | Vitest `4.1.10` | Pure domain tests, provider contracts, and API behavior. |
 | Browser tests | Playwright `1.62.1` | Installability, responsive journeys, accessibility, and full planning flow. |
 
@@ -192,26 +192,26 @@ MapLibre is a renderer, not a venue, search or routing database. OpenFreeMap sup
 flowchart LR
   PWA["Next.js PWA"] --> API["Authenticated route handlers"]
   API --> DOMAIN["Pure planning and recommendation domain"]
-  API --> DB["Supabase Postgres with RLS"]
-  API --> QUEUE["Supabase durable queues"]
-  QUEUE --> WORKER["Scheduled Edge Function worker"]
+  API --> DB["Turso/libSQL via Drizzle"]
+  API --> QUEUE["Durable run/outbox tables (current seam)"]
+  QUEUE -. planned worker .-> WORKER["External scheduled worker"]
   WORKER --> ONEMAP["OneMap search and transit"]
   WORKER --> VENUES["Curated venue catalogue"]
   WORKER --> CAL["Google Calendar free/busy"]
   WORKER --> EMAIL["Resend"]
   WORKER --> PUSH["Web Push"]
-  DB --> RT["Participant-safe Realtime tables"]
-  RT --> PWA
+  DB --> EVENTS["Participant-safe plan events"]
+  EVENTS --> PWA
   PWA --> MAP["MapLibre + OpenFreeMap on map view only"]
 ```
 
 ### Architectural boundaries
 
-- `domain/` contains deterministic TypeScript and imports no Next.js, Supabase, Google, or OneMap modules.
+- `domain/` contains deterministic TypeScript and imports no Next.js, database, Google, or OneMap modules.
 - `providers/` translates external responses to canonical domain DTOs and owns timeouts, retries, attribution metadata, and error mapping.
 - `repositories/` owns database access. Components never call sensitive tables directly.
-- Public client queries can read only participant-safe views/tables through RLS.
-- Private operations use short server routes or Edge Functions. The Supabase service-role key never reaches Next.js client bundles.
+- Public clients call authenticated Next.js route handlers only; they never connect directly to Turso. Route handlers and repository helpers enforce participant-safe projections and organizer/member authorization.
+- Private operations use server-only route handlers. Turso credentials, location keyrings, Resend keys, and future provider tokens never reach Next.js client bundles.
 - Every external mutation uses an idempotency key.
 
 ## 7. Plan state machine
@@ -236,15 +236,15 @@ Every mutation supplies `expectedVersion`. The database increments `plans.versio
 
 ## 8. Data model
 
-All primary keys are UUIDv7 or database-generated UUIDs. All timestamps are `timestamptz` in UTC. The plan retains `timezone = 'Asia/Singapore'`. Money is integer Singapore cents. User-entered text is plain text with length limits; HTML is rejected.
+The current schema uses application-generated text IDs (for example `user_*`, `plan_*`, and `run_*`) and ISO-8601 UTC text timestamps. Plans retain `timezone = 'Asia/Singapore'`. Money is integer Singapore cents. User-entered text is plain text with length limits; HTML is rejected. Turso/libSQL is the remote system of record; local SQLite is a development/legacy-conversion mode only.
 
 ### Identity and preferences
 
 | Table | Essential fields and rules |
 |---|---|
-| `profiles` | `user_id`, `display_name`, `avatar_path`, `account_kind(full/guest)`, `timezone`, notification preferences, timestamps. Email remains in Auth, not duplicated publicly. |
+| `profiles` | `id`, normalized `email`, `display_name`, `avatar_path`, `account_kind(full/guest)`, `timezone`, coarse area, notification preferences, timestamps. Email is stored for the application-managed magic-link identity and is never exposed in participant-safe projections unless required by the current actor. |
 | `dining_companions` | `owner_user_id`, `companion_user_id`, `status`, `is_favourite`, `created_at`; unique pair; accepted consent required. |
-| `private_locations` | `user_id`, encrypted coordinate payload, coarse area label, OneMap postal/address reference, key version, timestamps. Owner can replace/delete; no client SELECT policy. |
+| `private_locations` | Subject (`profile` or `plan_participant`), owner, optional plan, AES-GCM ciphertext/nonce/tag, payload/key versions, timestamps. Coarse labels remain on participant/profile rows; no client SELECT path exists. |
 | `dietary_rules` | `user_id`, `rule_code`, `severity(allergy/hard/preference)`, optional note, visibility; unique per rule. |
 | `cuisine_preferences` | `user_id`, `cuisine_code`, `weight` from -2 to +2. |
 | `calendar_connections` | `user_id`, provider, encrypted refresh token, granted scopes, expiry/status, timestamps; no client SELECT. |
@@ -258,7 +258,7 @@ All primary keys are UUIDv7 or database-generated UUIDs. All timestamps are `tim
 | `plan_invites` | Plan, intended-email hash, token hash, expiry, accepted/revoked timestamps, creator; server-only read. |
 | `availability_windows` | Participant, plan, start/end, source manual/calendar, derived-at timestamp; only windows intersecting the plan are retained. |
 | `recommendation_runs` | Plan/version, algorithm version, status, encrypted private input snapshot, provider timestamps, weights, quota usage, failure code, expiry. |
-| `recommendation_candidates` | Run, rank, provider/place ID, category badges, display-cache expiry, travel and price confidence, explanation version. Google-derived display content is expiring cache data. |
+| `recommendation_candidates` | Run, rank, provider/venue ID, category badges, display fields, travel/price/dietary evidence, booking/map links, and explanation. Provider-derived display data is cached with explicit provenance/verification limits. |
 | `candidate_scores` | Candidate, hard-filter result/reasons, food score, budget score, fairness score, total-travel score, quality score, diversity adjustment, total score, deterministic tie breaker. |
 | `ballots` | Plan, run, participant, submitted/updated timestamp; unique per participant/run. |
 | `ballot_selections` | Ballot and candidate; transaction enforces candidate membership and the frozen maximum selection count. |
@@ -269,8 +269,8 @@ All primary keys are UUIDv7 or database-generated UUIDs. All timestamps are `tim
 
 | Table | Essential fields and rules |
 |---|---|
-| `notification_outbox` | Event, recipient, channel, template, idempotency key, attempts, next attempt, sent/dead status. No sensitive payload fields. |
-| `push_subscriptions` | Owner, encrypted endpoint/keys, user agent, timestamps; private and revocable. |
+| `notification_outbox` | Current seam: recipient, channel, template, JSON payload, sent timestamp, and created timestamp. A dispatcher, idempotency key, attempt/dead-letter fields, and safe-payload enforcement are required by DT-011 before plan-event delivery is claimed. |
+| `push_subscriptions` | Planned only; no current API/table or delivery evidence. If added, endpoint/keys must be encrypted, owner-bound, revocable, and absent from client/log/analytics payloads. |
 | `feedback` | Plan, participant, recommendation satisfaction 1–5, reuse intent boolean, optional reason, timestamps. |
 | `audit_events` | Actor, plan, action, redacted metadata, timestamp; immutable and never contains raw origins/tokens. |
 | `provider_usage` | Provider, SKU/operation, internal billing events, day/month, soft/hard cap state. |
@@ -280,9 +280,9 @@ All primary keys are UUIDv7 or database-generated UUIDs. All timestamps are `tim
 
 - Guest invite token: until accepted/revoked/expired; maximum 72 hours.
 - Unaccepted guest planning data: delete 30 days after plan cancellation/expiry.
-- Raw/derived Google Calendar free/busy intervals: delete after the plan completes plus 24 hours.
+- Raw/derived calendar free/busy intervals (when the optional connector is enabled): delete after the plan completes plus 24 hours.
 - Encrypted origin snapshot: delete 30 days after plan completion; keep only journey durations and coarse areas for analytics.
-- Google display cache: expire according to current provider policy and refresh before display.
+- Provider-derived venue display cache: expire according to the active provider/catalogue policy and refresh before display.
 - Audit/decision records: retain while the account or plan history exists, with private values redacted.
 - Account deletion: delete or irreversibly anonymize locations, preferences, tokens, subscriptions, pending invites, and personal analytics identifiers.
 
@@ -368,7 +368,7 @@ For `lowest_total_time`, swap the fairness and total-travel weights. Weights are
 
 ### Budget estimate
 
-- Maintain versioned Singapore per-person ranges for each Google price tier and meal type.
+- Maintain versioned Singapore per-person ranges for each catalogue/provider price tier and meal type.
 - Multiply by participant count.
 - If alcohol is included, add a configurable per-drinker range rather than assuming every participant drinks.
 - Current default estimate applies a typical 10% service charge when configured for the venue, then 9% GST to the subtotal including service charge. These are versioned settings, not hard-coded constants.
@@ -383,31 +383,31 @@ For `lowest_total_time`, swap the fairness and total-travel weights. Weights are
 
 ## 11. API contracts
 
-All JSON endpoints validate with Zod, require CSRF-safe authenticated requests, enforce rate limits, and return `{ data, error, requestId }`. Errors contain a stable `code`, user-safe `message`, and optional `fieldErrors`.
+The release target is for all JSON endpoints to validate with Zod, require CSRF-safe authenticated requests, enforce rate limits, and return `{ data, error, requestId }`. The current handlers already use bounded validation, membership checks, and stable user-safe errors; complete CSRF/origin enforcement, request IDs, and endpoint-wide rate limits remain release work tracked by DT-007/DT-014.
 
 ### Core endpoints
 
-| Method and path | Contract |
-|---|---|
-| `GET /api/v1/me` | Participant-safe profile and setup status. |
-| `PATCH /api/v1/me/profile` | Display name, preferences, notification settings. |
-| `PUT /api/v1/me/location` | OneMap result ID or coordinates; server encrypts and returns only coarse label. |
-| `POST /api/v1/companions/invites` | Invite a verified email to become a saved companion. |
-| `POST /api/v1/plans` | Create a draft with date/window/meal/budget/travel mode. |
-| `POST /api/v1/plans/:id/invites` | Create expiring, intended-email-bound plan invite. |
-| `PUT /api/v1/plans/:id/participation` | Submit plan-specific origin, availability, and dietary confirmation. |
-| `POST /api/v1/plans/:id/recommendations` | Validate readiness and enqueue a versioned run; returns HTTP 202 and job/run ID. |
-| `GET /api/v1/plans/:id/recommendations/:runId` | Polling fallback for queued/running/ready/failed state. |
-| `POST /api/v1/plans/:id/voting/open` | Organizer freezes current run and opens voting. |
-| `PUT /api/v1/plans/:id/ballot` | Replace the caller's selections transactionally; server computes/enforces cap. |
-| `POST /api/v1/plans/:id/confirm` | Organizer selects shortlisted candidate and exact time; override reason required for non-leader. |
-| `POST /api/v1/plans/:id/acknowledgements` | Participant accepts or flags a conflict. |
-| `POST /api/v1/plans/:id/feedback` | Satisfaction, reuse intent, optional reason. |
-| `GET /api/v1/notifications` | Paginated in-app activity feed. |
-| `POST /api/v1/push-subscriptions` | Store an owner-bound Web Push subscription after permission. |
-| `GET /api/v1/oauth/google/start` | PKCE/state-protected Calendar connection start. |
-| `GET /api/v1/oauth/google/callback` | Server token exchange and scope verification. |
-| `DELETE /api/v1/oauth/google` | Revoke provider grant and delete tokens. |
+| Method and path | Contract | Current status |
+|---|---|---|
+| `GET /api/v1/me` | Participant-safe profile and setup status. | Implemented |
+| `PATCH /api/v1/me/profile` | Display name, coarse planning area, dietary/cuisine preferences, and notification settings; the server stores the mapped precise origin privately. | Implemented |
+| `GET /api/v1/geocode?q=...` | Search the supported Singapore planning-area catalogue; only public/coarse labels are returned. | Implemented with local catalogue; authoritative provider planned |
+| `POST /api/v1/companions/invites` | Invite a verified email to become a saved companion. | Implemented (lifecycle limits tracked by DT-012) |
+| `POST /api/v1/plans` | Create a draft with date/window/meal/budget/travel mode. | Implemented |
+| `POST /api/v1/plans/:id/invites` | Create expiring, intended-email-bound plan invite. | Implemented; transactional invite delivery planned |
+| `PUT /api/v1/plans/:id/participation` | Submit plan-specific origin, availability, and dietary confirmation. | Implemented; deliberate readiness gap tracked by DT-005 |
+| `POST /api/v1/plans/:id/recommendations` | Validate readiness and create a versioned run; current MVP completes the deterministic curated run synchronously. | Implemented; durable async worker planned |
+| `GET /api/v1/plans/:id/recommendations/:runId` | Poll queued/running/ready/failed state. | Planned |
+| `POST /api/v1/plans/:id/voting/open` | Organizer freezes current run and opens voting. | Implemented |
+| `PUT /api/v1/plans/:id/ballot` | Replace the caller's selections transactionally; server computes/enforces cap. | Implemented |
+| `POST /api/v1/plans/:id/confirm` | Organizer selects shortlisted candidate and exact time; override reason required for non-leader. | Implemented; delivery receipt is not yet implemented |
+| `POST /api/v1/plans/:id/acknowledgements` | Participant accepts or flags a conflict. | Implemented; notification delivery planned |
+| `POST /api/v1/plans/:id/feedback` | Satisfaction, reuse intent, optional reason. | Implemented; temporal/idempotency gates tracked by DT-013 |
+| `GET /api/v1/notifications` | Paginated in-app activity feed. | Planned |
+| `POST /api/v1/push-subscriptions` | Store an owner-bound Web Push subscription after permission. | Planned |
+| `GET /api/v1/oauth/google/start` | PKCE/state-protected Calendar connection start. | Planned; manual availability is current |
+| `GET /api/v1/oauth/google/callback` | Server token exchange and scope verification. | Planned |
+| `DELETE /api/v1/oauth/google` | Revoke provider grant and delete tokens. | Planned |
 
 ### Example: create plan
 
@@ -459,8 +459,8 @@ The transaction verifies plan state, frozen run, caller membership, unique short
 - Provider failure: keep all plan inputs and expose retry; never return a blank page.
 - Calendar failure: explain reauthorization and retain manual availability.
 - Venue closed/fully booked after confirmation: `Replace venue` reruns the same constraints excluding the failed place.
-- Push denied: email and in-app feed continue normally.
-- Invitation email bounced: organizer sees delivery status and can resend after rate limit.
+- Push denied: the in-app plan remains the source of truth; email is only a fallback after the Resend path is provisioned and a delivery receipt exists.
+- Invitation email bounced: until DT-011 is implemented, the organizer sees the in-app invite state rather than a false delivery claim; the release target adds bounded resend/status after rate limiting.
 - Participant changed inputs: warn that current recommendations and ballots will be invalidated.
 - Dashboard request failed: distinguish failure from a genuinely empty plan list and expose retry.
 - Voting incomplete: tell the organizer exactly how many eligible ballots are missing before an explicit early lock-in.
@@ -491,11 +491,17 @@ The transaction verifies plan state, frozen run, caller membership, unique short
 2. Transactional email, reliable default.
 3. Web push, optional after the first successfully created/joined plan.
 
-Notify on invitation, participant-ready reminder, voting opened, confirmation/override, material plan change, acknowledgement conflict, and upcoming-meal reminder. Do not notify on every vote. All messages deep-link to the exact plan state, support preferences/unsubscribe where applicable, and omit private location/diet/calendar details.
+### Current implementation boundary
+
+The profile stores email/push preferences and the database has a notification-outbox seam, but the current MVP does not expose an in-app notification feed, plan-event dispatcher, Web Push subscription endpoint, retry/dead-letter worker, or delivery receipt. Resend is currently used only for production magic-link authentication when configured; a test outbox is forbidden in production. The in-app plan state is therefore authoritative, and the confirmation action must not be treated as delivered email/push evidence. DT-011 owns the implementation and staged delivery proof.
+
+### Release target
+
+Notify on invitation, participant-ready reminder, voting opened, confirmation/override, material plan change, acknowledgement conflict, and upcoming-meal reminder. Do not notify on every vote. All messages deep-link to the exact plan state, support preferences/unsubscribe where applicable, and omit private location/diet/calendar details. Each event must be idempotent, have bounded retries/dead-letter visibility, and expose a delivery result without leaking message bodies or private data.
 
 ## 14. Security and privacy controls
 
-- RLS enabled on every exposed table and view; deny-by-default policies.
+- Turso tables are never client-readable; server route handlers enforce deny-by-default membership/organizer authorization and participant-safe projections. If the system later adopts a hosted policy layer, equivalent deny-by-default controls remain mandatory.
 - Automated authorization matrix for organizer, member, outsider, guest, anonymous, and service role.
 - Application-layer AES-GCM encryption for exact origins, OAuth tokens, and push subscriptions with key versioning.
 - OAuth authorization-code flow with PKCE, unguessable/replay-protected `state`, exact redirect allowlist, minimal `calendar.freebusy` scope, and server-only token exchange.
@@ -508,6 +514,8 @@ Notify on invitation, participant-ready reminder, voting opened, confirmation/ov
 - Secret scanning, dependency audit, CSP checks, and authorization tests gate deployment.
 
 ## 15. Directory tree
+
+The tree below is the target modular organization. The current MVP is intentionally smaller: database schema/init and provider adapters remain under `src/lib`/`src/providers`, and Turso migrations/verifiers are executable scripts under `scripts/`; no hosted-database function directory is required.
 
 ```text
 hangtime/
@@ -551,13 +559,8 @@ hangtime/
 │  ├─ analytics/
 │  ├─ lib/
 │  └─ types/
-├─ supabase/
-│  ├─ migrations/
-│  ├─ functions/
-│  │  ├─ recommendation-worker/
-│  │  └─ notification-worker/
-│  ├─ seed.sql
-│  └─ tests/
+├─ drizzle/
+│  └─ migrations/
 ├─ tests/
 │  ├─ unit/
 │  ├─ integration/
@@ -586,7 +589,7 @@ hangtime/
 ### Phase 1 — foundation and security (4–6 days)
 
 - Scaffold pinned Next.js/TypeScript/PWA project.
-- Configure Supabase local development, migrations, generated DB types, Auth, custom SMTP, and RLS.
+- Configure local SQLite development, Drizzle schema/migrations, Turso Preview/Production credentials, production magic-link email, and environment-specific location keyrings.
 - Implement profiles, private encrypted locations, preferences, companions, guest invites, plan state machine, and audit events.
 - Add environment validation, CSP, redaction, rate-limit middleware, error taxonomy, and CI.
 
@@ -633,7 +636,7 @@ Estimated focused MVP build: **24–36 engineering days**, depending primarily o
 
 - Unit: state transitions, vote formula, scoring, diversity, budget math, redaction, encryption envelope, and notification templates.
 - Property/fuzz: vote limits, score ranges, time-window overlap, budget rounding, and malformed provider payloads.
-- Integration: every API with RLS; queues and idempotency; OAuth state/PKCE; provider adapters against recorded compliant fixtures.
+- Integration: every API with server-side authorization; queue/outbox idempotency when the worker is added; OAuth state/PKCE; provider adapters against recorded compliant fixtures.
 - Security: outsider/anonymous matrix, invite reuse/enumeration, fourth-member race, over-vote race, XSS, CSRF, SSRF/URL allowlist, quota abuse, service-worker cache audit.
 - E2E: action-first home; organizer plus participant plus guest; manual and Calendar availability; deliberate readiness; no-results recovery; list/map ballot parity and outage; unbiased first ballot; tie/incomplete voting; override; confirmation; time-gated feedback; account deletion.
 - Accessibility: automated axe checks plus keyboard and screen-reader smoke flows.
@@ -652,7 +655,7 @@ Any failure receives a documented root cause before an edit and counts as a stri
 
 ### Beta acceptance
 
-- No exact location, OAuth token, invite secret, calendar response, or push endpoint appears in browser payloads, logs, analytics, URLs, emails, realtime events, or caches.
+- No exact location, OAuth token, invite secret, calendar response, or push endpoint appears in browser payloads, logs, analytics, URLs, emails, participant-safe plan events, or caches.
 - At least 20 representative Singapore planning scenarios have human-reviewed travel/budget explanations.
 - Recommendation p95 completes within 15 seconds or provides useful staged async progress.
 - Provider outage retains plan data and offers a usable retry/fallback.
@@ -713,10 +716,9 @@ If tested, sponsored venues must be explicitly labelled, must satisfy every hard
 - [OneMap authentication](https://www.onemap.gov.sg/apidocs/authentication)
 - [Bing Maps retirement notice](https://learn.microsoft.com/en-us/bingmaps/rest-services/getting-started-with-the-bing-maps-rest-services)
 - [Google Calendar quota and pricing](https://developers.google.com/workspace/calendar/api/guides/quota)
-- [Supabase free plan](https://supabase.com/pricing)
-- [Supabase Queues](https://supabase.com/docs/guides/queues)
-- [Supabase scheduled Edge Functions](https://supabase.com/docs/guides/functions/schedule-functions)
-- [Supabase production SMTP guidance](https://supabase.com/docs/guides/auth/auth-smtp)
+- [Turso documentation](https://docs.turso.tech/)
+- [Turso point-in-time recovery](https://docs.turso.tech/features/point-in-time-recovery)
+- [Vercel Functions documentation](https://vercel.com/docs/functions)
 - [Resend free limits](https://resend.com/docs/knowledge-base/what-is-resend-pricing)
 - [Singapore F&B GST and service-charge calculation](https://www.iras.gov.sg/taxes/goods-services-tax-%28gst%29/specific-business-sectors/hotel-and-food-beverage)
 - [Web Push API](https://developer.mozilla.org/en-US/docs/Web/API/Push_API)
