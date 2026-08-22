@@ -33,7 +33,7 @@ export function StagedProgress() {
         </div>
       </div>
 
-      <div>
+      <div aria-busy="true">
         <h3 className="font-display text-lg font-bold text-ink-950">
           Finding Fair Singapore Dining Spots…
         </h3>
@@ -41,6 +41,10 @@ export function StagedProgress() {
           Searching for venues that balance travel time, cuisine love, and group budget.
         </p>
       </div>
+
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {stages[currentStage].label}. {stages[currentStage].detail}
+      </p>
 
       <div className="max-w-sm mx-auto space-y-3 text-left">
         {stages.map((stage, idx) => {

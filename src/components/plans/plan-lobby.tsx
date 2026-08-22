@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ReadinessChecklist } from "@/components/plans/readiness-checklist";
 import {
   Users,
   CheckCircle2,
@@ -14,9 +15,7 @@ import {
   Sparkles,
   Copy,
   Check,
-  ShieldCheck,
 } from "lucide-react";
-import { SINGAPORE_PLANNING_AREAS } from "@/providers/singapore-transit";
 
 export interface PlanLobbyProps {
   plan: Plan;
@@ -25,6 +24,7 @@ export interface PlanLobbyProps {
   isOrganizer: boolean;
   onGenerateRecommendations: () => void;
   isGenerating: boolean;
+  onReadinessSaved?: () => void;
 }
 
 export function PlanLobby({
@@ -34,14 +34,10 @@ export function PlanLobby({
   isOrganizer,
   onGenerateRecommendations,
   isGenerating,
+  onReadinessSaved,
 }: PlanLobbyProps) {
   const { toast } = useToast();
   const [copiedInvite, setCopiedInvite] = useState(false);
-  const [selectedArea, setSelectedArea] = useState(
-    currentUser.coarseArea || "Novena / Balestier (Central)"
-  );
-  const [isUpdatingOrigin, setIsUpdatingOrigin] = useState(false);
-
   const currentParticipant = participants.find((p) => p.userId === currentUser.id);
   const allReady = participants.length >= 2 && participants.every((p) => p.isReady);
 
@@ -60,47 +56,6 @@ export function PlanLobby({
       }
     } catch {
       toast("Could not create invite link", "error");
-    }
-  };
-
-  const handleUpdateOrigin = async (newAreaLabel: string) => {
-    setSelectedArea(newAreaLabel);
-    setIsUpdatingOrigin(true);
-
-    try {
-      const res = await fetch(`/api/v1/plans/${plan.id}/participation`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          coarseOriginLabel: newAreaLabel,
-          isReady: true,
-        }),
-      });
-      if (res.ok) {
-        toast("Updated your meeting origin & marked ready!", "success");
-      }
-    } catch {
-      toast("Failed to update origin", "error");
-    } finally {
-      setIsUpdatingOrigin(false);
-    }
-  };
-
-  const handleToggleReady = async () => {
-    const nextState = !currentParticipant?.isReady;
-    try {
-      const res = await fetch(`/api/v1/plans/${plan.id}/participation`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          isReady: nextState,
-        }),
-      });
-      if (res.ok) {
-        toast(nextState ? "You're marked as ready!" : "Marked not ready", "info");
-      }
-    } catch {
-      toast("Failed to update readiness", "error");
     }
   };
 
@@ -147,7 +102,7 @@ export function PlanLobby({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-terra-600" />
+            <Users aria-hidden="true" className="h-4 w-4 text-terra-600" />
             <h3 className="font-display text-sm font-bold text-ink-900">
               People ({participants.length}/3)
             </h3>
@@ -214,11 +169,11 @@ export function PlanLobby({
                   <div className="text-right shrink-0">
                     {part.isReady ? (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-sage-600 bg-sage-50 border border-sage-200 px-2.5 py-1 rounded-full">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Ready
+                        <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" /> Ready
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full">
-                        <Clock className="h-3.5 w-3.5" /> Waiting
+                        <Clock aria-hidden="true" className="h-3.5 w-3.5" /> Waiting
                       </span>
                     )}
                   </div>
@@ -241,44 +196,13 @@ export function PlanLobby({
         </div>
       </div>
 
-      {/* Origin & Readiness Controls for Current User */}
-      <Card variant="default" className="p-4 space-y-3 border-cream-300 bg-cream-100/50">
-        <h4 className="font-display text-xs font-bold uppercase tracking-wider text-ink-600">
-          Your Planning Origin & Status
-        </h4>
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-ink-700 block">
-            Where are you traveling from for this hangout?
-          </label>
-          <select
-            value={selectedArea}
-            onChange={(e) => handleUpdateOrigin(e.target.value)}
-            disabled={isUpdatingOrigin}
-            className="w-full rounded-xl border border-cream-300 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-900 focus:border-terra-500 focus:outline-none"
-          >
-            {SINGAPORE_PLANNING_AREAS.map((a) => (
-              <option key={a.label} value={a.label}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-          <p className="text-[11px] text-ink-400 flex items-center gap-1">
-            <ShieldCheck className="h-3.5 w-3.5 text-sage-600" />
-            Exact postal code/coordinates are used only for calculations and never shown to companions.
-          </p>
-        </div>
-
-        <div className="pt-2 flex items-center justify-between">
-          <Button
-            variant={currentParticipant?.isReady ? "outline" : "sage"}
-            size="sm"
-            onClick={handleToggleReady}
-            className="text-xs"
-          >
-            {currentParticipant?.isReady ? "Mark as Not Ready" : "✓ I'm Ready to Find Places"}
-          </Button>
-        </div>
-      </Card>
+      {/* Deliberate readiness controls for the active participant */}
+      <ReadinessChecklist
+        plan={plan}
+        currentUser={currentUser}
+        participant={currentParticipant}
+        onSaved={onReadinessSaved}
+      />
 
       {/* Trigger Recommendations Button */}
       <div className="pt-2">

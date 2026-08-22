@@ -67,7 +67,10 @@ test.describe("Adversarial user and recovery journeys", () => {
     const ethan = page.getByRole("button", { name: /Ethan Tan/ });
     await ethan.click();
     await expect(ethan).toHaveAttribute("aria-pressed", "true");
-    await page.getByRole("button", { name: /Brunch/ }).click();
+    const brunch = page.getByRole("radio", { name: /Brunch/ });
+    await brunch.focus();
+    await page.keyboard.press("Space");
+    await expect(brunch).toBeChecked();
     await page.locator('input[type="range"]').fill("180");
     await page.getByRole("button", { name: "Create Plan & Go to Lobby" }).click();
 
@@ -75,7 +78,7 @@ test.describe("Adversarial user and recovery journeys", () => {
     await expect(page).toHaveURL(/\/plans\/new/);
     await expect(ethan).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator('input[type="range"]')).toHaveValue("180");
-    await expect(page.getByRole("button", { name: /Brunch/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(brunch).toBeChecked();
 
     await page.getByRole("button", { name: "Create Plan & Go to Lobby" }).click();
     await expect(page).toHaveURL(/\/plans\/plan_/);

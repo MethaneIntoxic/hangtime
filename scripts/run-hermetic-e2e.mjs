@@ -7,6 +7,7 @@ const tempRoot = mkdtempSync(join(tmpdir(), "dinner-time-e2e-"));
 const databaseUrl = join(tempRoot, "uat.db");
 const port = String(32000 + Math.floor(Math.random() * 1000));
 const pnpmEntrypoint = process.env.npm_execpath;
+const playwrightArgs = process.argv.slice(2);
 const env = {
   ...process.env,
   CI: "true",
@@ -32,7 +33,7 @@ function run(args) {
 }
 
 try {
-  if (run(["db:seed"])) run(["exec", "playwright", "test"]);
+  if (run(["db:seed"])) run(["exec", "playwright", "test", ...playwrightArgs]);
 } finally {
   const resolved = resolve(tempRoot);
   if (!resolved.startsWith(resolve(tmpdir()))) throw new Error("Refusing to remove a non-temporary E2E directory");

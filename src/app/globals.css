@@ -21,6 +21,16 @@
   outline-offset: 2px;
 }
 
+.maplibregl-ctrl-attrib {
+  background-color: var(--color-cream-50) !important;
+  color: var(--color-ink-800) !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--color-ink-800) !important;
+  text-decoration: underline;
+}
+
 /* ---------------------------------------------------------------------------
    Hangtime design system — warm, playful, socially neutral.
    --------------------------------------------------------------------------- */
@@ -37,9 +47,9 @@
   --color-terra-200: #f7c2ae;
   --color-terra-300: #f09d7f;
   --color-terra-400: #e9764f;
-  --color-terra-500: #e3472d;
-  --color-terra-600: #c93622;
-  --color-terra-700: #a6361b;
+  --color-terra-500: #c93622;
+  --color-terra-600: #a6361b;
+  --color-terra-700: #852e1c;
   --color-terra-800: #852e1c;
   --color-terra-900: #6d291b;
 
@@ -68,8 +78,8 @@
   --color-ink-800: #332a21;
   --color-ink-700: #463b30;
   --color-ink-600: #5c5043;
-  --color-ink-500: #77685a;
-  --color-ink-400: #948575;
+  --color-ink-500: #635448;
+  --color-ink-400: #6d5d4e;
   --color-ink-300: #b3a698;
 
   /* Typography */
@@ -230,6 +240,10 @@
     font-weight: 800;
     letter-spacing: 0.18em;
     text-transform: uppercase;
+  }
+
+  .bg-ink-950 .route-code {
+    color: var(--color-sage-100);
   }
 
   .paper-panel {

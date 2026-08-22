@@ -103,21 +103,32 @@ export function ConfirmModal({
     >
       <div className="space-y-4 pt-1">
         {/* Venue Selection */}
-        <div className="space-y-2">
-          <label className="text-xs font-bold text-ink-900 block uppercase tracking-wider">
+        <fieldset className="space-y-2">
+          <legend id="confirm-venue-label" className="text-xs font-bold text-ink-900 block uppercase tracking-wider">
             1. Select Venue
-          </label>
+          </legend>
           <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
             {candidates.map((c) => {
               const isSelected = selectedCandidateId === c.id;
               const isItemLeader = tally?.leaders?.includes(c.id);
               const votes = tally?.candidateVotes?.[c.id] || 0;
+              const venueId = `confirm-venue-${c.id}`;
 
               return (
-                <div
-                  key={c.id}
-                  onClick={() => setSelectedCandidateId(c.id)}
-                  className={`p-3 rounded-2xl border transition-all cursor-pointer ${
+                <div key={c.id}>
+                  <input
+                    id={venueId}
+                    type="radio"
+                    name="confirmVenue"
+                    value={c.id}
+                    checked={isSelected}
+                    onChange={() => setSelectedCandidateId(c.id)}
+                    aria-label={`${c.name}, rank ${c.rank}${isItemLeader ? `, group leader with ${votes} ${votes === 1 ? "vote" : "votes"}` : ""}`}
+                    className="peer sr-only"
+                  />
+                  <label
+                    htmlFor={venueId}
+                    className={`block w-full cursor-pointer rounded-2xl border p-3 text-left transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400 ${
                     isSelected
                       ? "bg-terra-50 border-terra-500 ring-2 ring-terra-300"
                       : "bg-cream-100/70 border-cream-200 hover:border-terra-300"
@@ -142,15 +153,16 @@ export function ConfirmModal({
                     </div>
                     {isSelected && (
                       <div className="h-5 w-5 rounded-full bg-terra-500 text-white flex items-center justify-center shrink-0">
-                        <Check className="h-3.5 w-3.5" />
+                        <Check aria-hidden="true" className="h-3.5 w-3.5" />
                       </div>
                     )}
                   </div>
+                  </label>
                 </div>
               );
             })}
           </div>
-        </div>
+        </fieldset>
 
         {/* Override Reason Box if choosing a non-leader */}
         {isOverride && (
@@ -162,14 +174,16 @@ export function ConfirmModal({
             <p className="text-[11px] text-amber-950 leading-relaxed">
               You are picking an option other than the group vote leader. Please provide a brief, transparent reason visible to your companions.
             </p>
-            <textarea
+            <label htmlFor="confirm-override-reason" className="sr-only">Reason for choosing a non-leading venue</label>
+              <textarea
+              id="confirm-override-reason"
               value={overrideReason}
               onChange={(e) => setOverrideReason(e.target.value)}
               placeholder="e.g., Dumpling Darlings is fully booked at 7pm, so picking Tipo Pasta Bar instead."
               rows={2}
-              className="w-full rounded-xl border border-amber-300 bg-cream-50 p-2.5 text-xs text-ink-900 focus:border-terra-500 focus:outline-none placeholder:text-ink-400"
+                className="w-full rounded-xl border border-amber-300 bg-cream-50 p-2.5 text-xs text-ink-900 focus:border-terra-500 placeholder:text-ink-400"
             />
-            <div className="flex justify-between text-[10px] text-amber-900">
+            <div className="flex justify-between text-[10px] text-amber-900" aria-live="polite">
               <span>{overrideReason.trim().length}/10 min chars</span>
               <span>240 max</span>
             </div>
@@ -177,28 +191,37 @@ export function ConfirmModal({
         )}
 
         {/* Exact Start Time Selection (15-min intervals) */}
-        <div className="space-y-1.5 pt-1">
-          <label className="text-xs font-bold text-ink-900 flex items-center gap-1.5 uppercase tracking-wider">
-            <Clock className="h-3.5 w-3.5 text-terra-600" />
+        <fieldset className="space-y-1.5 pt-1">
+          <legend id="confirm-time-label" className="text-xs font-bold text-ink-900 flex items-center gap-1.5 uppercase tracking-wider">
+            <Clock aria-hidden="true" className="h-3.5 w-3.5 text-terra-600" />
             2. Exact Arrival Time
-          </label>
+          </legend>
           <div className="grid grid-cols-4 gap-2">
             {timeSlots.map((time) => (
-              <button
-                key={time}
-                type="button"
-                onClick={() => setExactStartTime(time)}
-                className={`py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              <div key={time}>
+                <input
+                  id={`confirm-time-${time.replace(":", "-")}`}
+                  type="radio"
+                  name="exactStartTime"
+                  value={time}
+                  checked={exactStartTime === time}
+                  onChange={() => setExactStartTime(time)}
+                  className="peer sr-only"
+                />
+                <label
+                  htmlFor={`confirm-time-${time.replace(":", "-")}`}
+                  className={`flex min-h-11 cursor-pointer items-center justify-center rounded-xl border py-2 text-xs font-semibold transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400 ${
                   exactStartTime === time
                     ? "bg-terra-500 text-white border-terra-600 shadow-soft"
                     : "bg-cream-100 text-ink-800 border-cream-300 hover:bg-cream-200"
-                }`}
-              >
-                {time}
-              </button>
+                  }`}
+                >
+                  {time}
+                </label>
+              </div>
             ))}
           </div>
-        </div>
+        </fieldset>
 
         {/* Action Buttons */}
         <div className="flex gap-2 pt-3 border-t border-cream-200">

@@ -31,6 +31,7 @@ export function Header() {
   const [isDemo, setIsDemo] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const { toast } = useToast();
   useEffect(() => {
     fetch("/api/v1/me")
@@ -52,7 +53,10 @@ export function Header() {
   useEffect(() => {
     if (!isDropdownOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsDropdownOpen(false);
+      if (event.key === "Escape") {
+        setIsDropdownOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     const closeOnOutsideClick = (event: MouseEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) setIsDropdownOpen(false);
@@ -133,10 +137,13 @@ export function Header() {
         <div ref={menuRef} className="relative">
           {isDemo ? (
             <button
+              ref={triggerRef}
               type="button"
               onClick={() => setIsDropdownOpen((open) => !open)}
               aria-haspopup="menu"
               aria-expanded={isDropdownOpen}
+              aria-controls="demo-perspective-menu"
+              aria-label={`Switch demo diner. Current diner: ${activeUser.name}`}
               className="flex min-h-11 items-center gap-2 border-l border-white/20 pl-3 text-left sm:pl-5"
             >
               <span className="grid h-9 w-9 place-items-center rounded-full border border-white/30 bg-terra-600 text-xs font-extrabold text-white">
@@ -173,7 +180,7 @@ export function Header() {
           )}
 
           {isDemo && isDropdownOpen && (
-            <div role="menu" className="absolute right-0 top-full mt-3 w-72 border border-ink-900/20 bg-[#fffaf1] p-2 shadow-pop">
+            <div id="demo-perspective-menu" role="menu" aria-label="Demo diner perspective" className="absolute right-0 top-full mt-3 w-72 border border-ink-900/20 bg-[#fffaf1] p-2 shadow-pop">
               <div className="border-b border-ink-900/15 px-3 py-2">
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-terra-700">Demo perspective</p>
                 <p className="mt-1 text-xs leading-5 text-ink-600">Switch diners to test readiness and voting.</p>
@@ -182,7 +189,8 @@ export function Header() {
                 <button
                   key={user.id}
                   type="button"
-                  role="menuitem"
+                  role="menuitemradio"
+                  aria-checked={currentUser === user.id}
                   onClick={() => handleSwitchUser(user.id, user.name)}
                   className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left hover:bg-cream-200"
                 >
@@ -191,7 +199,7 @@ export function Header() {
                     <span className="block text-sm font-bold text-ink-950">{user.name}</span>
                     <span className="block text-xs text-ink-500">{user.area}</span>
                   </span>
-                  {currentUser === user.id && <Check className="h-4 w-4 text-sage-700" aria-label="Current diner" />}
+                  {currentUser === user.id && <Check aria-hidden="true" className="h-4 w-4 text-sage-700" />}
                 </button>
               ))}
             </div>

@@ -133,7 +133,7 @@ export function Dialog({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close"
+          aria-label="Close dialog"
           className="absolute top-2 right-2 flex h-11 w-11 items-center justify-center rounded-full text-ink-500 hover:bg-cream-200/80 hover:text-ink-800 transition-colors cursor-pointer"
         >
           <X aria-hidden="true" className="h-4 w-4" />

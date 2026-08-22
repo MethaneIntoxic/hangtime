@@ -5,8 +5,27 @@ import { and, eq, desc } from "drizzle-orm";
 import { tallyBallots, calculateMaxSelections } from "@/domain/voting/rules";
 import {
   requirePlanMember,
+  requirePlanOrganizer,
   stripPrivateLocationFields,
 } from "@/lib/auth/plan-access";
+import { client } from "@/lib/db";
+import { PlanMutationError, updatePlanInputsAtomically } from "@/lib/db/plan-mutations";
+import { z } from "zod";
+
+const planUpdateSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  windowStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  windowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  mealType: z.enum(["dinner", "lunch", "brunch", "coffee", "drinks"]).optional(),
+  groupBudgetCents: z.number().int().min(4_000).max(40_000).optional(),
+  alcoholMode: z.enum(["included", "excluded"]).optional(),
+  fairnessMode: z.enum(["equal_journeys", "lowest_total_time"]).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.windowStart && value.windowEnd && value.windowEnd <= value.windowStart) {
+    context.addIssue({ code: "custom", path: ["windowEnd"], message: "End time must be after start time." });
+  }
+});
 
 export async function GET(
   req: Request,
@@ -71,12 +90,15 @@ export async function GET(
   const isOrganizer = access.isOrganizer;
 
   // Fetch latest recommendation run
-  const latestRun = await db
+  const latestRunCandidate = await db
     .select()
     .from(schema.recommendationRuns)
     .where(eq(schema.recommendationRuns.planId, planId))
     .orderBy(desc(schema.recommendationRuns.createdAt))
     .get();
+  const latestRun = latestRunCandidate && latestRunCandidate.status === "completed" && latestRunCandidate.planVersion === plan.version
+    ? latestRunCandidate
+    : undefined;
 
   let candidates: ReturnType<typeof JSON.parse>[] = [];
   const ballotsList = [];
@@ -172,4 +194,50 @@ export async function GET(
       reuseIntent: Boolean(userFeedback.reuseIntent),
     } : null,
   });
+}
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id: planId } = await params;
+  const user = await getCurrentUser();
+  if (!user) return apiError("UNAUTHORIZED", "Not signed in", 401);
+  const access = await requirePlanOrganizer(planId, user.id);
+  if (!access.ok) return apiError(access.code, access.message, access.status);
+
+  try {
+    const parsed = planUpdateSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) return apiError("INVALID_INPUT", "Check the plan details and try again.", 400);
+    const { expectedVersion, ...changes } = parsed.data;
+    const current = access.plan;
+    const effectiveWindowStart = changes.windowStart ?? current.windowStart;
+    const effectiveWindowEnd = changes.windowEnd ?? current.windowEnd;
+    if (effectiveWindowEnd <= effectiveWindowStart) {
+      return apiError("INVALID_INPUT", "End time must be after start time.", 400, { windowEnd: ["End time must be after start time."] });
+    }
+    if (expectedVersion !== current.version) {
+      return apiError("PLAN_VERSION_CONFLICT", "This plan changed in another tab. Reload before editing it again.", 409);
+    }
+    const changedFields = (Object.keys(changes) as Array<keyof typeof changes>)
+      .filter((field) => changes[field] !== undefined && changes[field] !== current[field as keyof typeof current]);
+    if (changedFields.length === 0) return apiSuccess({ plan: current, invalidated: false });
+    if (["confirmed", "completed", "cancelled"].includes(current.state)) {
+      return apiError("INVALID_STATE", "Locked plans cannot change their planning inputs.", 409);
+    }
+    await updatePlanInputsAtomically(client, {
+      planId,
+      organizerId: user.id,
+      expectedVersion,
+      changes,
+      reason: `plan_${changedFields.join("_")}_changed`,
+    });
+    const updated = await db.select().from(schema.plans).where(eq(schema.plans.id, planId)).get();
+    return apiSuccess({ plan: updated, invalidated: true });
+  } catch (error) {
+    if (error instanceof PlanMutationError) {
+      return apiError(error.code, error.message, error.status);
+    }
+    return apiError("SERVER_ERROR", "The plan could not be updated.", 500);
+  }
 }

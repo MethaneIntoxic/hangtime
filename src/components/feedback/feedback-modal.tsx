@@ -61,81 +61,116 @@ export function FeedbackModal({
     >
       <div className="space-y-4 pt-1">
         {/* 1. Star Rating */}
-        <div className="space-y-2 text-center bg-cream-100/60 p-3.5 rounded-2xl border border-cream-200">
-          <label className="text-xs font-bold text-ink-900 block uppercase tracking-wider">
+        <fieldset className="space-y-2 text-center bg-cream-100/60 p-3.5 rounded-2xl border border-cream-200">
+          <legend className="text-xs font-bold text-ink-900 block uppercase tracking-wider">
             1. Recommendation Satisfaction
-          </label>
+          </legend>
           <div className="flex justify-center gap-2">
-            {[1, 2, 3, 4, 5].map((star) => (
-              <button
-                key={star}
-                type="button"
-                onClick={() => setSatisfaction(star)}
-                className="p-1 text-2xl transition-transform hover:scale-125 active:scale-95 cursor-pointer focus:outline-none"
-              >
-                <Star
-                  className={`h-7 w-7 ${
-                    star <= satisfaction
-                      ? "fill-amber-400 text-amber-500"
-                      : "text-ink-300"
-                  }`}
-                />
-              </button>
-            ))}
+            {[1, 2, 3, 4, 5].map((star) => {
+              const starId = `feedback-satisfaction-${star}`;
+              return (
+                <span key={star}>
+                  <input
+                    id={starId}
+                    type="radio"
+                    name="satisfaction"
+                    value={star}
+                    aria-label={`${star} out of 5 stars`}
+                    checked={satisfaction === star}
+                    onChange={() => setSatisfaction(star)}
+                    className="peer sr-only"
+                  />
+                  <label
+                    htmlFor={starId}
+                    className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center p-1 text-2xl transition-transform hover:scale-125 active:scale-95 peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400"
+                  >
+                    <Star
+                      aria-hidden="true"
+                      className={`h-7 w-7 ${
+                        star <= satisfaction
+                          ? "fill-amber-400 text-amber-500"
+                          : "text-ink-300"
+                      }`}
+                    />
+                  </label>
+                </span>
+              );
+            })}
           </div>
-          <span className="text-[11px] font-semibold text-terra-700 block">
+          <span className="text-[11px] font-semibold text-terra-700 block" aria-live="polite" aria-atomic="true">
             {satisfaction === 5 && "Outstanding recommendation!"}
             {satisfaction === 4 && "Great spot, really enjoyed it"}
             {satisfaction === 3 && "Decent experience"}
             {satisfaction === 2 && "Could have been better"}
             {satisfaction === 1 && "Didn't meet expectations"}
           </span>
-        </div>
+        </fieldset>
 
         {/* 2. Reuse Intent (Yes / No) */}
-        <div className="space-y-2 text-center bg-cream-100/60 p-3.5 rounded-2xl border border-cream-200">
-          <label className="text-xs font-bold text-ink-900 block uppercase tracking-wider">
+        <fieldset className="space-y-2 text-center bg-cream-100/60 p-3.5 rounded-2xl border border-cream-200">
+          <legend className="text-xs font-bold text-ink-900 block uppercase tracking-wider">
             2. Would you use Hangtime with this group again?
-          </label>
+          </legend>
           <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setReuseIntent(true)}
-              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+            <span>
+              <input
+                id="feedback-reuse-yes"
+                type="radio"
+                name="reuseIntent"
+                value="yes"
+                checked={reuseIntent}
+                onChange={() => setReuseIntent(true)}
+                className="peer sr-only"
+              />
+              <label
+                htmlFor="feedback-reuse-yes"
+                className={`flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl border py-2.5 text-xs font-bold transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400 ${
                 reuseIntent
                   ? "bg-sage-600 text-white border-sage-700 shadow-soft"
                   : "bg-cream-50 text-ink-700 border-cream-300 hover:bg-cream-200"
               }`}
             >
-              <ThumbsUp className="h-4 w-4" />
+              <ThumbsUp aria-hidden="true" className="h-4 w-4" />
               <span>Definitely Yes</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setReuseIntent(false)}
-              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+              </label>
+            </span>
+            <span>
+              <input
+                id="feedback-reuse-no"
+                type="radio"
+                name="reuseIntent"
+                value="no"
+                checked={!reuseIntent}
+                onChange={() => setReuseIntent(false)}
+                className="peer sr-only"
+              />
+              <label
+                htmlFor="feedback-reuse-no"
+                className={`flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl border py-2.5 text-xs font-bold transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400 ${
                 !reuseIntent
                   ? "bg-berry-600 text-white border-berry-700 shadow-soft"
                   : "bg-cream-50 text-ink-700 border-cream-300 hover:bg-cream-200"
               }`}
             >
-              <ThumbsDown className="h-4 w-4" />
+              <ThumbsDown aria-hidden="true" className="h-4 w-4" />
               <span>Not Sure / No</span>
-            </button>
+              </label>
+            </span>
           </div>
-        </div>
+        </fieldset>
 
         {/* Optional Comment */}
         <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-ink-600 block">
+          <label htmlFor="feedback-notes" className="text-[11px] font-semibold text-ink-600 block">
             Optional Notes or Highlights:
           </label>
           <textarea
+            id="feedback-notes"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="e.g. Travel time was super fair and pasta was incredible!"
             rows={2}
-            className="w-full rounded-xl border border-cream-300 bg-cream-50 p-2.5 text-xs text-ink-900 focus:border-terra-500 focus:outline-none"
+            className="w-full rounded-xl border border-cream-300 bg-cream-50 p-2.5 text-xs text-ink-900 focus:border-terra-500"
           />
         </div>
 

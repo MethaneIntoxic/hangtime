@@ -92,7 +92,7 @@ export function BallotView({
   const leaderCandidate = candidates.find((candidate) => tally?.leaders.includes(candidate.id));
 
   return (
-    <div className="space-y-5 pb-24 sm:pb-0">
+    <div className="space-y-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:pb-0">
       <section className="border-y border-ink-900/20 bg-[#fffaf1] px-4 py-5 sm:px-6" aria-labelledby="ballot-title">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -103,7 +103,7 @@ export function BallotView({
               <span className="inline-flex items-center gap-1.5"><Clock3 className="h-4 w-4" aria-hidden="true" />{plan.windowStart}–{plan.windowEnd}</span>
             </div>
           </div>
-          <div className="shrink-0 border-l-2 border-terra-600 pl-4">
+          <div className="shrink-0 border-l-2 border-terra-600 pl-4" aria-live="polite" aria-atomic="true">
             <span className="block font-display text-2xl font-semibold text-ink-950">{selectedIds.length} of {maxSelections}</span>
             <span className="text-xs text-ink-600">selected · choose at least one</span>
           </div>
@@ -154,7 +154,7 @@ export function BallotView({
         })}
       </div>
 
-      <div className="fixed inset-x-0 bottom-16 z-30 border-t border-ink-900/20 bg-cream-50/95 p-3 backdrop-blur md:sticky md:bottom-4 md:border md:px-4">
+      <div role="region" className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 border-t border-ink-900/20 bg-cream-50/95 p-3 backdrop-blur md:sticky md:bottom-4 md:border md:px-4" aria-label="Ballot submission">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
           <p className="hidden text-xs text-ink-600 sm:block"><b className="text-ink-950">{selectedIds.length}</b> selected of {maxSelections} allowed</p>
           <Button variant="primary" size="md" onClick={handleSaveBallot} isLoading={isSubmitting} disabled={selectedIds.length === 0} className="ml-auto w-full font-bold sm:w-auto">

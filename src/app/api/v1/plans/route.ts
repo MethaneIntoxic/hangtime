@@ -207,7 +207,9 @@ export async function POST(req: Request) {
       updatedAt: now,
     });
 
-    // 2. Add organizer as participant (marked ready if coarse area exists)
+    // 2. Add organizer as an explicitly incomplete participant. A planning
+    // area alone is not a readiness declaration; availability and dietary
+    // state must be reviewed in the lobby first.
     const organizerParticipantId = generateId("part");
     await db.insert(schema.planParticipants).values({
       id: organizerParticipantId,
@@ -215,7 +217,8 @@ export async function POST(req: Request) {
       userId: user.id,
       role: "organizer",
       coarseOriginLabel: user.coarseArea || "Central (Novena)",
-      isReady: 1,
+      isReady: 0,
+      dietaryDeclared: 0,
       acknowledgedState: "pending",
       joinedAt: now,
     });
@@ -235,7 +238,8 @@ export async function POST(req: Request) {
           userId: compUser.id,
           role: "member",
           coarseOriginLabel: compUser.coarseArea || "Jurong East (West)",
-          isReady: companionLocation ? 1 : 0,
+          isReady: 0,
+          dietaryDeclared: 0,
           acknowledgedState: "pending",
           joinedAt: now,
         });

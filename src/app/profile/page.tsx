@@ -123,8 +123,8 @@ export default function ProfilePage() {
     return (
       <div className="min-h-dvh bg-cream-50">
         <Header />
-        <div className="py-24 text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-terra-500 border-t-transparent" />
+          <div role="status" aria-live="polite" aria-label="Loading profile" className="py-24 text-center">
+            <div aria-hidden="true" className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-terra-500 border-t-transparent" />
         </div>
       </div>
     );
@@ -172,25 +172,30 @@ export default function ProfilePage() {
                 .toUpperCase()}
             </span>
             <div className="space-y-1 flex-1">
+              <label htmlFor="profile-display-name" className="sr-only">Display name</label>
               <input
+                id="profile-display-name"
+                name="displayName"
                 type="text"
                 value={profile.displayName}
                 onChange={(e) => setProfile({ ...profile, displayName: e.target.value })}
-                className="font-display text-base font-bold text-ink-950 bg-cream-50 px-2 py-1 rounded-lg border border-cream-300 focus:border-terra-500 focus:outline-none w-full"
+                className="font-display text-base font-bold text-ink-950 bg-cream-50 px-2 py-1 rounded-lg border border-cream-300 focus:border-terra-500 w-full"
               />
               <p className="text-xs text-ink-500 px-2">{profile.email}</p>
             </div>
           </div>
 
           <div className="space-y-1.5 pt-2 border-t border-cream-200">
-            <label className="text-xs font-bold text-ink-800 flex items-center gap-1">
-              <MapPin className="h-3.5 w-3.5 text-terra-600" />
+            <label htmlFor="profile-coarse-area" className="text-xs font-bold text-ink-800 flex items-center gap-1">
+              <MapPin aria-hidden="true" className="h-3.5 w-3.5 text-terra-600" />
               Default Singapore Planning Area
             </label>
             <select
+              id="profile-coarse-area"
+              name="coarseArea"
               value={profile.coarseArea}
               onChange={(e) => setProfile({ ...profile, coarseArea: e.target.value })}
-              className="w-full rounded-xl border border-cream-300 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-900 focus:border-terra-500 focus:outline-none"
+              className="w-full rounded-xl border border-cream-300 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-900 focus:border-terra-500"
             >
               {SINGAPORE_PLANNING_AREAS.map((a) => (
                 <option key={a.label} value={a.label}>
@@ -247,10 +252,12 @@ export default function ProfilePage() {
                       )}
                     </div>
                     <button
+                      type="button"
                       onClick={() => handleRemoveDietaryRule(rule.ruleCode)}
-                      className="p-1 text-ink-400 hover:text-berry-600 transition-colors cursor-pointer"
+                      aria-label={`Remove ${info.label} dietary rule`}
+                      className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-ink-400 transition-colors hover:text-berry-600 cursor-pointer"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 aria-hidden="true" className="h-4 w-4" />
                     </button>
                   </div>
                 );
@@ -260,9 +267,12 @@ export default function ProfilePage() {
 
           {/* Add Dietary Rule Form */}
           <div className="p-3 rounded-2xl bg-cream-100/60 border border-cream-200 space-y-2 text-xs">
-            <span className="font-bold text-ink-800 block">Add Dietary Restriction:</span>
+             <span id="add-dietary-label" className="font-bold text-ink-800 block">Add Dietary Restriction:</span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label htmlFor="new-dietary-rule" className="sr-only">Dietary rule</label>
               <select
+                id="new-dietary-rule"
+                name="dietaryRule"
                 value={newRuleCode}
                 onChange={(e) => setNewRuleCode(e.target.value)}
                 className="rounded-xl border border-cream-300 bg-cream-50 px-2.5 py-1.5 text-xs text-ink-900"
@@ -274,7 +284,10 @@ export default function ProfilePage() {
                 ))}
               </select>
 
+              <label htmlFor="new-dietary-severity" className="sr-only">Dietary rule severity</label>
               <select
+                id="new-dietary-severity"
+                name="dietarySeverity"
                 value={newRuleSeverity}
                 onChange={(e) => setNewRuleSeverity(e.target.value as "allergy" | "hard" | "preference")}
                 className="rounded-xl border border-cream-300 bg-cream-50 px-2.5 py-1.5 text-xs text-ink-900"
@@ -286,7 +299,10 @@ export default function ProfilePage() {
             </div>
 
             <div className="flex gap-2">
+              <label htmlFor="new-dietary-note" className="sr-only">Dietary rule note</label>
               <input
+                id="new-dietary-note"
+                name="dietaryNote"
                 type="text"
                 value={newRuleNote}
                 onChange={(e) => setNewRuleNote(e.target.value)}
@@ -319,10 +335,12 @@ export default function ProfilePage() {
               return (
                 <div
                   key={cuisine.code}
+                  role="group"
+                  aria-label={`${cuisine.label} preference`}
                   className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-2xl bg-cream-100/50 border border-cream-200 gap-2 text-xs"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">{cuisine.icon}</span>
+                    <span aria-hidden="true" className="text-lg">{cuisine.icon}</span>
                     <span className="font-bold text-ink-900">{cuisine.label}</span>
                   </div>
 
@@ -332,7 +350,9 @@ export default function ProfilePage() {
                         key={val}
                         type="button"
                         onClick={() => handleCuisineWeightChange(cuisine.code, val)}
-                        className={`h-7 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        aria-pressed={weight === val}
+                        aria-label={`${cuisine.label}: ${val === 2 ? "Love" : val === 1 ? "Like" : val === 0 ? "Neutral" : val === -1 ? "Dislike" : "Avoid"}`}
+                        className={`min-h-11 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                           weight === val
                             ? val > 0
                               ? "bg-terra-500 text-white shadow-soft"

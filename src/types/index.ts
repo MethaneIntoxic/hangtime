@@ -66,12 +66,20 @@ export interface PlanParticipant {
   role: ParticipantRole;
   coarseOriginLabel?: string | null;
   isReady: boolean;
+  /** Explicit acknowledgement that dietary rules/preferences were reviewed for this plan. */
+  dietaryDeclared?: boolean;
   acknowledgedState: AcknowledgedState;
   joinedAt: string;
   profile?: UserProfile;
   dietaryRules?: DietaryRule[];
   cuisinePreferences?: CuisinePreference[];
   availability?: AvailabilityWindow[];
+}
+
+export interface AvailabilityWindowInput {
+  startTime: string;
+  endTime: string;
+  source: "manual" | "calendar";
 }
 
 export interface AvailabilityWindow {
@@ -219,4 +227,12 @@ export interface ApiResponse<T = unknown> {
     fieldErrors?: Record<string, string[]>;
   };
   requestId: string;
+}
+
+export interface ParticipationUpdateInput {
+  coarseOriginLabel?: string | null;
+  isReady?: boolean;
+  dietaryDeclared?: boolean;
+  availability?: AvailabilityWindowInput[];
+  inviteToken?: string;
 }

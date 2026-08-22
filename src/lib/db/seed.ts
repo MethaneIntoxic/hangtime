@@ -164,6 +164,7 @@ export async function seedDatabase() {
       role: "organizer",
       coarseOriginLabel: "Novena / Balestier (Central)",
       isReady: 1,
+      dietaryDeclared: 1,
       acknowledgedState: "pending",
       joinedAt: now,
     },
@@ -174,6 +175,7 @@ export async function seedDatabase() {
       role: "member",
       coarseOriginLabel: "Jurong East / Clementi (West)",
       isReady: 1,
+      dietaryDeclared: 1,
       acknowledgedState: "pending",
       joinedAt: now,
     },
@@ -186,13 +188,17 @@ export async function seedDatabase() {
     { participantId: "part_voting_ethan", userId: "user_ethan", planId: planVotingId },
     { postalCode: "609731", lat: 1.3329, lng: 103.7436 },
   );
+  await db.insert(schema.availabilityWindows).values([
+    { id: "avail_voting_maya", participantId: "part_voting_maya", planId: planVotingId, startTime: "19:00", endTime: "21:30", source: "manual" },
+    { id: "avail_voting_ethan", participantId: "part_voting_ethan", planId: planVotingId, startTime: "19:00", endTime: "21:30", source: "manual" },
+  ]);
 
   // Run recommendations for Plan 1
   const run1Id = "run_demo_01";
   await db.insert(schema.recommendationRuns).values({
     id: run1Id,
     planId: planVotingId,
-    planVersion: 2,
+    planVersion: 3,
     algorithmVersion: "v1.0",
     status: "completed",
     weightsJson: JSON.stringify({ fairness: 0.3, totalTravel: 0.2, foodMatch: 0.25, budgetFit: 0.2, quality: 0.05 }),
@@ -308,6 +314,7 @@ export async function seedDatabase() {
       role: "organizer",
       coarseOriginLabel: "Novena / Balestier",
       isReady: 1,
+      dietaryDeclared: 1,
       acknowledgedState: "acknowledged",
       joinedAt: now,
     },
@@ -318,6 +325,7 @@ export async function seedDatabase() {
       role: "member",
       coarseOriginLabel: "Jurong East",
       isReady: 1,
+      dietaryDeclared: 1,
       acknowledgedState: "acknowledged",
       joinedAt: now,
     },
@@ -328,6 +336,7 @@ export async function seedDatabase() {
       role: "member",
       coarseOriginLabel: "Tampines",
       isReady: 1,
+      dietaryDeclared: 1,
       acknowledgedState: "pending",
       joinedAt: now,
     },
@@ -344,12 +353,17 @@ export async function seedDatabase() {
     { participantId: "part_conf_clara", userId: "user_clara", planId: planConfirmedId },
     { postalCode: "529538", lat: 1.3533, lng: 103.9452 },
   );
+  await db.insert(schema.availabilityWindows).values([
+    { id: "avail_conf_maya", participantId: "part_conf_maya", planId: planConfirmedId, startTime: "19:00", endTime: "21:00", source: "manual" },
+    { id: "avail_conf_ethan", participantId: "part_conf_ethan", planId: planConfirmedId, startTime: "19:00", endTime: "21:00", source: "manual" },
+    { id: "avail_conf_clara", participantId: "part_conf_clara", planId: planConfirmedId, startTime: "19:00", endTime: "21:00", source: "manual" },
+  ]);
 
   const run2Id = "run_demo_02";
   await db.insert(schema.recommendationRuns).values({
     id: run2Id,
     planId: planConfirmedId,
-    planVersion: 4,
+    planVersion: 5,
     algorithmVersion: "v1.0",
     status: "completed",
     createdAt: now,

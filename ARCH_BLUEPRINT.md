@@ -115,7 +115,7 @@ The release-governing behavior, visual, accessibility, privacy, and evidence req
 
 ## 4. Validated technical stack
 
-The repository contains the implemented modular-monolith MVP. Local development uses an on-disk SQLite database; Vercel Preview and Production use separate remote Turso/libSQL databases. This document distinguishes that deployed baseline from future provider, queue, and calendar work so an aspirational contract is not mistaken for current evidence.
+The repository contains the implemented modular-monolith MVP. Local development uses an on-disk SQLite database; the supported remote contract uses separate Turso/libSQL databases for Vercel Preview and Production. The Iteration 2 source has not yet completed its remote Turso migration or replaced the live Production revision. This document distinguishes the implemented source baseline, the still-required deployment evidence, and future provider, queue, and calendar work so an aspirational contract is not mistaken for current evidence.
 
 | Layer | Selection | Reason |
 |---|---|---|
@@ -395,8 +395,8 @@ The release target is for all JSON endpoints to validate with Zod, require CSRF-
 | `POST /api/v1/companions/invites` | Invite a verified email to become a saved companion. | Implemented (lifecycle limits tracked by DT-012) |
 | `POST /api/v1/plans` | Create a draft with date/window/meal/budget/travel mode. | Implemented |
 | `POST /api/v1/plans/:id/invites` | Create expiring, intended-email-bound plan invite. | Implemented; transactional invite delivery planned |
-| `PUT /api/v1/plans/:id/participation` | Submit plan-specific origin, availability, and dietary confirmation. | Implemented; deliberate readiness gap tracked by DT-005 |
-| `POST /api/v1/plans/:id/recommendations` | Validate readiness and create a versioned run; current MVP completes the deterministic curated run synchronously. | Implemented; durable async worker planned |
+| `PUT /api/v1/plans/:id/participation` | Submit plan-specific origin, availability, dietary confirmation, and deliberate readiness. Material changes atomically clear readiness and invalidate derived recommendation/ballot state. | Implemented and covered locally; remote Turso/deployed journey remains a release gate |
+| `POST /api/v1/plans/:id/recommendations` | Validate every participant's readiness evidence and create one versioned run; concurrent retries converge on the committed run. The current MVP completes the deterministic curated run synchronously. | Implemented and covered locally; durable async worker planned |
 | `GET /api/v1/plans/:id/recommendations/:runId` | Poll queued/running/ready/failed state. | Planned |
 | `POST /api/v1/plans/:id/voting/open` | Organizer freezes current run and opens voting. | Implemented |
 | `PUT /api/v1/plans/:id/ballot` | Replace the caller's selections transactionally; server computes/enforces cap. | Implemented |

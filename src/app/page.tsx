@@ -202,7 +202,7 @@ export default function HomePage() {
           </div>
 
           {isLoading ? (
-            <div className="grid gap-px bg-ink-900/10" aria-label="Loading your plans" aria-busy="true">
+            <div role="status" className="grid gap-px bg-ink-900/10" aria-label="Loading your plans" aria-busy="true">
               {[0, 1].map((item) => <div key={item} className="h-28 animate-pulse-soft bg-cream-100" />)}
             </div>
           ) : activePlans.length === 0 ? (

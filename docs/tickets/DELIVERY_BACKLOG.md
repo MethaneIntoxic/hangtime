@@ -32,6 +32,26 @@ Created from UAT runs `UAT-2026-08-17-01` through `UAT-2026-08-21` and architect
 | DT-009 | In progress | Server validation now rejects empty/duplicate/unaccepted companions, invalid windows, invalid budget and invalid enums. Intentional direct-page selection and meal-aware time defaults remain. |
 | DT-014 | In progress | CSP/HSTS, revision-aware smoke, actionlint, isolated Turso environments, staged Vercel promotion and shared deploy locks are added. Live GitHub/Vercel/Turso evidence remains. |
 
+## Progress update — 2026-08-22, Iteration 2
+
+| Ticket | Status | New evidence |
+|---|---|---|
+| DT-003 | In progress | Three-person capacity and a concurrent final-seat race are automated, but one complete plan has not yet been driven by three independent authenticated sessions. Pending invitations also do not reserve a seat. |
+| DT-004 | In progress | Core acceptance, one-time reuse rejection, capacity, and final-seat concurrency have coverage. The required pending-invite reservation redesign, complete unsafe-token matrix, and deployed email-bound journey remain open. |
+| DT-005 | Source acceptance and low-finding remediation verified locally; Production migration gate complete; deployed gate pending | Deliberate readiness requires origin, overlapping availability, and dietary confirmation. Material participant/plan edits atomically clear readiness and delete stale runs/ballots; stale confirmations and ballots fail, and concurrent generation converges on one run. Canonical ordering comparisons and order-invariance tests now address both sealed low findings in source. Production Turso migration postconditions are complete; deployed authenticated acceptance and code deployment remain pre-release gates. |
+| DT-006 | Complete in automated source scope; physical review pending | Axe reports no serious/critical violations across home, create, lobby, voting, confirm, feedback, profile, and join fixtures. Keyboard selection, radio navigation, Escape/focus restoration, live semantics, and 320/390/430px mobile action geometry are automated. Physical screen-reader, forced-colors, 200% zoom, iOS, and Android evidence remains part of release UAT. |
+
+## Sealed security diff follow-up — 2026-08-22
+
+Scan `a3d5047a-6725-4799-aa8e-c418f14f1cb1` is complete and sealed against the pre-remediation snapshot, with complete coverage of 33 changed source files. It produced two reportable low-severity findings. Both are now remediated in the current source and verified locally; neither remediation is deployed.
+
+| Finding | Affected path | Status | Remediation |
+|---|---|---|---|
+| Equivalent profile preference reordering invalidates shared plans (`csf_f86680152ec33535ed29cc66`) | `src/app/api/v1/me/profile/route.ts:37-47` → `:109-126` and `src/lib/plan-inputs/canonical.ts` | Historical sealed finding, low, medium confidence; recoverable disruption by an authenticated user | Remediated locally with canonical preference-set comparison; order-invariance tests pass. Not deployed. |
+| Equivalent availability reordering invalidates shared plan state (`csf_1e24511cf1424f2e54bad434`) | `src/app/api/v1/plans/[id]/participation/route.ts:295-318` → `src/lib/db/plan-mutations.ts:46-76` and `src/lib/plan-inputs/canonical.ts` | Historical sealed finding, low, high confidence; recoverable disruption by an authenticated participant | Remediated locally with canonical availability-window comparison; order-invariance tests pass. Not deployed. |
+
+The scan also recorded two suppressed follow-ups. The apparent missing route-local CSRF check is covered in the production threat model by `src/proxy.ts` exact-origin protection for unsafe `/api/:path*` requests; this is not a fix if a deployment bypasses that proxy. The readiness-omission candidate remains a correctness/state-integrity follow-up: omitted availability can persist `isReady`, while downstream recommendation validation rejects missing availability, so no protected recommendation workflow bypass was demonstrated. Migration hardening now preflights four duplicate identity classes transactionally before unique-index creation. The scan and remediation verification used no production credentials or database. The Production Turso migration gate is now complete by separate read-only postcondition evidence; deployed authenticated UAT and code deployment remain explicit pre-release gates.
+
 ## DT-001 — Production email authentication
 
 Problem: the production magic-link/session path is implemented in the repository, but account-owned Resend delivery, remote deployment evidence, and the complete live sign-in journey are not provisioned. The demo switcher remains local-only and is not evidence for beta.
@@ -48,6 +68,8 @@ Acceptance criteria:
 ## DT-002 — Turso durable storage and precise-location protection
 
 Problem: local SQLite is appropriate only for development and legacy conversion tooling; Vercel must use remote Turso/libSQL with protected migrations. Precise origins must remain envelope-encrypted through migration, backup, restore, and key rotation.
+
+Production Turso migration gate: **Complete**. An authenticated Turso SQL console applied the migration one statement at a time because sensitive Vercel secrets are non-readable to the CLI. Read-only postconditions are: dietary column `1`, migration marker `1`, integrity indexes `4`, duplicate identity groups `0`, and `private_locations` preserved `1`. No secret rotation, data deletion, paid feature, or Preview migration was performed. The Preview database remains empty/unprovisioned; current source/code deployment and authenticated deployed UAT remain pending. This closes the Production migration gate only, not the full backup, restore, key-rotation, or deployed-UAT ticket.
 
 Acceptance criteria:
 
@@ -83,7 +105,9 @@ Acceptance criteria:
 
 ## DT-005 — Readiness and recommendation validity
 
-Problem: recommendation generation can be presented before every participant has supplied the inputs needed for a fair result.
+Status: **Source acceptance and remediation of the two sealed low findings are complete in the checked-out source; the Production Turso migration gate is complete, while deployed authenticated acceptance and code deployment remain pre-release gates.**
+
+Resolved behavior: recommendation generation now requires every active participant to have a private origin, overlapping availability, an explicit dietary declaration, and deliberate ready state. Material edits atomically invalidate readiness, recommendations, candidates, and ballots; version checks prevent stale writes; concurrent duplicate generation returns the single committed run.
 
 Acceptance criteria:
 
@@ -94,7 +118,9 @@ Acceptance criteria:
 
 ## DT-006 — Accessible interactive controls
 
-Problem: audit targets include clickable containers, map pins, feedback stars, and modal choices without proven keyboard behavior.
+Status: **Complete in automated source scope; physical assistive-technology review remains a release UAT gate.**
+
+Resolved behavior: the primary routes and dialogs have automated axe coverage, native/equivalent control semantics, keyboard flows, focus restoration, live status/error behavior, and narrow-viewport collision checks. This status does not substitute for physical screen-reader, forced-colors, 200% zoom, iOS, or Android evidence.
 
 Acceptance criteria:
 

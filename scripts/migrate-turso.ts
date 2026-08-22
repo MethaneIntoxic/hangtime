@@ -29,6 +29,19 @@ try {
   )).rows.map((row) => String(row.name)));
   const missing = requiredTables.filter((table) => !tables.has(table));
   if (missing.length > 0) throw new Error(`Remote migration is incomplete: ${missing.join(", ")}`);
+  const participantColumns = new Set((await client.execute(
+    "PRAGMA table_info(plan_participants)",
+  )).rows.map((row) => String(row.name)));
+  if (!participantColumns.has("dietary_declared")) {
+    throw new Error("Remote migration is incomplete: plan_participants.dietary_declared is missing");
+  }
+  const integrityMigration = await client.execute({
+    sql: "SELECT 1 FROM schema_migrations WHERE version = ?",
+    args: ["0005_readiness_and_plan_integrity"],
+  });
+  if (integrityMigration.rows.length !== 1) {
+    throw new Error("Remote migration is incomplete: readiness integrity migration was not recorded");
+  }
   console.log(`TURSO_MIGRATION_PASS active_location_key=${keyring.activeVersion}`);
 } finally {
   client.close();

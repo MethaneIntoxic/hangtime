@@ -72,6 +72,7 @@ export const planParticipants = sqliteTable("plan_participants", {
   role: text("role").notNull().default("member"), // 'organizer' | 'member'
   coarseOriginLabel: text("coarse_origin_label"),
   isReady: integer("is_ready").notNull().default(0),
+  dietaryDeclared: integer("dietary_declared").notNull().default(0),
   acknowledgedState: text("acknowledged_state").notNull().default("pending"), // 'pending' | 'acknowledged' | 'conflict'
   joinedAt: text("joined_at").notNull(),
 }, (table) => [
@@ -107,7 +108,9 @@ export const recommendationRuns = sqliteTable("recommendation_runs", {
   weightsJson: text("weights_json"),
   failureReason: text("failure_reason"),
   createdAt: text("created_at").notNull(),
-});
+}, (table) => [
+  uniqueIndex("recommendation_runs_plan_version_uq").on(table.planId, table.planVersion),
+]);
 
 export const recommendationCandidates = sqliteTable("recommendation_candidates", {
   id: text("id").primaryKey(),
@@ -152,7 +155,9 @@ export const ballots = sqliteTable("ballots", {
   runId: text("run_id").notNull(),
   userId: text("user_id").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (table) => [
+  uniqueIndex("ballots_plan_run_user_uq").on(table.planId, table.runId, table.userId),
+]);
 
 export const ballotSelections = sqliteTable("ballot_selections", {
   id: text("id").primaryKey(),
@@ -169,7 +174,9 @@ export const planDecisions = sqliteTable("plan_decisions", {
   overrideReason: text("override_reason"),
   decidedBy: text("decided_by").notNull(),
   createdAt: text("created_at").notNull(),
-});
+}, (table) => [
+  uniqueIndex("plan_decisions_plan_uq").on(table.planId),
+]);
 
 export const planEvents = sqliteTable("plan_events", {
   id: text("id").primaryKey(),

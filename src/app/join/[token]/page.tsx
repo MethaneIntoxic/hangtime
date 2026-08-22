@@ -72,7 +72,6 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
         body: JSON.stringify({
           inviteToken: token,
           coarseOriginLabel: selectedArea,
-          isReady: true,
         }),
       });
       const payload = await joinResponse.json();
@@ -106,32 +105,32 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
             <Button variant="outline" size="md" className="mt-5" onClick={() => router.push("/")}>Return home</Button>
           </section>
         ) : !invite ? (
-          <div className="mt-8 h-80 animate-pulse-soft border border-ink-900/15 bg-cream-100" aria-busy="true" aria-label="Checking invitation" />
+          <div role="status" aria-live="polite" aria-busy="true" className="mt-8 h-80 animate-pulse-soft border border-ink-900/15 bg-cream-100" aria-label="Checking invitation" />
         ) : (
           <section className="meal-ticket mt-8 border border-ink-900/20 bg-[#fffaf1] p-6 shadow-lift sm:p-8">
             <div className="border-b border-dashed border-ink-900/20 pb-5">
               <p className="text-sm text-ink-600">{invite.organizerDisplayName} invited you to</p>
               <h2 className="mt-1 font-display text-3xl font-semibold capitalize text-ink-950">{invite.mealType}</h2>
               <div className="mt-4 flex flex-wrap gap-4 text-xs font-semibold text-ink-700">
-                <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-4 w-4" />{formatDateLabel(invite.date)}</span>
-                <span className="inline-flex items-center gap-1.5"><Clock3 className="h-4 w-4" />{invite.windowStart}–{invite.windowEnd}</span>
+                <span className="inline-flex items-center gap-1.5"><CalendarDays aria-hidden="true" className="h-4 w-4" />{formatDateLabel(invite.date)}</span>
+                <span className="inline-flex items-center gap-1.5"><Clock3 aria-hidden="true" className="h-4 w-4" />{invite.windowStart}–{invite.windowEnd}</span>
               </div>
             </div>
 
             <form onSubmit={handleJoin} className="mt-6 space-y-5">
               <div>
                 <label htmlFor="guest-name" className="mb-2 block text-sm font-bold text-ink-800">What should we call you?</label>
-                <input id="guest-name" value={guestName} onChange={(event) => setGuestName(event.target.value)} required autoComplete="name" placeholder="Jordan" className="min-h-12 w-full border border-ink-900/20 bg-cream-50 px-4 text-sm text-ink-950 focus:border-terra-600 focus:outline-none" />
+                <input id="guest-name" name="guestName" value={guestName} onChange={(event) => setGuestName(event.target.value)} required autoComplete="name" placeholder="Jordan" className="min-h-12 w-full border border-ink-900/20 bg-cream-50 px-4 text-sm text-ink-950 focus:border-terra-600" />
               </div>
               <div>
                 <label htmlFor="origin-area" className="mb-2 block text-sm font-bold text-ink-800">Where will you travel from?</label>
                 <div className="relative">
                   <MapPin className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-terra-600" aria-hidden="true" />
-                  <select id="origin-area" value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)} className="min-h-12 w-full appearance-none border border-ink-900/20 bg-cream-50 pl-10 pr-4 text-sm text-ink-950 focus:border-terra-600 focus:outline-none">
+                  <select id="origin-area" name="originArea" value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)} className="min-h-12 w-full appearance-none border border-ink-900/20 bg-cream-50 pl-10 pr-4 text-sm text-ink-950 focus:border-terra-600">
                     {SINGAPORE_PLANNING_AREAS.map((area) => <option key={area.label} value={area.label}>{area.label}</option>)}
                   </select>
                 </div>
-                <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-sage-700"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />Your companion sees only this general area, never the precise origin used for travel estimates.</p>
+                <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-sage-700"><ShieldCheck aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />Your companion sees only this general area, never the precise origin used for travel estimates.</p>
               </div>
               <Button type="submit" variant="primary" size="lg" isLoading={isJoining} className="w-full font-bold">
                 Join plan <ArrowRight className="h-4 w-4" aria-hidden="true" />

@@ -1,10 +1,10 @@
 import { getCurrentUser } from "@/lib/auth/session";
 import { apiSuccess, apiError } from "@/lib/api-response";
-import { db, schema } from "@/lib/db";
-import { eq, and, desc } from "drizzle-orm";
-import { generateId } from "@/lib/auth/crypto";
-import { calculateMaxSelections, tallyBallots } from "@/domain/voting/rules";
+import { client, db, schema } from "@/lib/db";
+import { eq, desc } from "drizzle-orm";
+import { calculateMaxSelections } from "@/domain/voting/rules";
 import { requirePlanMember } from "@/lib/auth/plan-access";
+import { PlanMutationError, saveCurrentBallot } from "@/lib/db/plan-mutations";
 
 export async function PUT(
   req: Request,
@@ -45,7 +45,7 @@ export async function PUT(
       .orderBy(desc(schema.recommendationRuns.createdAt))
       .get();
 
-    if (!run) {
+    if (!run || run.status !== "completed" || run.planVersion !== plan.version) {
       return apiError("NOT_FOUND", "No active recommendation run found.", 404);
     }
 
@@ -72,82 +72,20 @@ export async function PUT(
 
     const now = new Date().toISOString();
 
-    // Transactionally update ballot
-    let ballot = await db
-      .select()
-      .from(schema.ballots)
-      .where(
-        and(
-          eq(schema.ballots.planId, planId),
-          eq(schema.ballots.runId, run.id),
-          eq(schema.ballots.userId, user.id)
-        )
-      )
-      .get();
-
-    if (!ballot) {
-      const ballotId = generateId("bal");
-      await db.insert(schema.ballots).values({
-        id: ballotId,
-        planId,
-        runId: run.id,
-        userId: user.id,
-        updatedAt: now,
-      });
-      ballot = { id: ballotId, planId, runId: run.id, userId: user.id, updatedAt: now };
-    } else {
-      await db
-        .update(schema.ballots)
-        .set({ updatedAt: now })
-        .where(eq(schema.ballots.id, ballot.id));
-
-      await db
-        .delete(schema.ballotSelections)
-        .where(eq(schema.ballotSelections.ballotId, ballot.id));
-    }
-
-    if (candidateIds.length > 0) {
-      await db.insert(schema.ballotSelections).values(
-        candidateIds.map((cId: string) => ({
-          id: generateId("bs"),
-          ballotId: ballot!.id,
-          candidateId: cId,
-        }))
-      );
-    }
-
-    // Compute updated tally
-    const allBallots = await db
-      .select()
-      .from(schema.ballots)
-      .where(eq(schema.ballots.runId, run.id));
-
-    const ballotsWithSelections = [];
-    for (const b of allBallots) {
-      const selections = await db
-        .select()
-        .from(schema.ballotSelections)
-        .where(eq(schema.ballotSelections.ballotId, b.id));
-      ballotsWithSelections.push({
-        userId: b.userId,
-        selections: selections.map((s) => s.candidateId),
-      });
-    }
-
-    const tally = tallyBallots(
-      candidates.map((c) => c.id),
-      ballotsWithSelections
-    );
+    const result = await saveCurrentBallot(client, { planId, userId: user.id, candidateIds, now });
 
     return apiSuccess({
       ballot: {
-        id: ballot.id,
+        id: result.ballotId,
         userId: user.id,
         selections: candidateIds,
       },
-      tally,
+      tally: result.tally,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof PlanMutationError) {
+      return apiError(error.code, error.message, error.status);
+    }
     return apiError("SERVER_ERROR", "Your ballot could not be saved.", 500);
   }
 }

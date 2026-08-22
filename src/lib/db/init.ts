@@ -1,4 +1,5 @@
 import type { Client } from "@libsql/client";
+import { applyIncrementalMigrations } from "./migrations";
 
 function isBusy(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -94,6 +95,7 @@ export async function initDatabase(
       role TEXT NOT NULL DEFAULT 'member',
       coarse_origin_label TEXT,
       is_ready INTEGER NOT NULL DEFAULT 0,
+      dietary_declared INTEGER NOT NULL DEFAULT 0,
       acknowledged_state TEXT NOT NULL DEFAULT 'pending',
       joined_at TEXT NOT NULL
     );
@@ -309,6 +311,8 @@ export async function initDatabase(
       await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
     }
   }
+
+  await applyIncrementalMigrations(client);
 
   for (const table of ["profiles", "plan_participants"]) {
     const columns = await client.execute(`PRAGMA table_info(${table})`);

@@ -4,6 +4,11 @@ import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { generateId } from "@/lib/auth/crypto";
 import { planningAreaLocation, saveProfileLocation } from "@/lib/location/service";
+import { invalidatePlanDerivedState } from "@/lib/db/plan-validity";
+import {
+  sameCuisinePreferences,
+  sameDietaryRules,
+} from "@/lib/plan-inputs/canonical";
 import { z } from "zod";
 
 const updateProfileSchema = z.object({
@@ -32,6 +37,16 @@ export async function PATCH(req: Request) {
       return apiError("INVALID_INPUT", "Check the profile details and try again.", 400);
     }
     const { displayName, coarseArea, dietaryRules, cuisinePreferences } = parsed.data;
+
+    const currentDietaryRules = dietaryRules === undefined
+      ? undefined
+      : await db.select().from(schema.dietaryRules).where(eq(schema.dietaryRules.userId, user.id));
+    const currentCuisinePreferences = cuisinePreferences === undefined
+      ? undefined
+      : await db.select().from(schema.cuisinePreferences).where(eq(schema.cuisinePreferences.userId, user.id));
+    const dietaryChanged = dietaryRules !== undefined && !sameDietaryRules(dietaryRules, currentDietaryRules ?? []);
+    const cuisineChanged = cuisinePreferences !== undefined && !sameCuisinePreferences(cuisinePreferences, currentCuisinePreferences ?? []);
+    const originChanged = coarseArea !== undefined && coarseArea !== user.coarseArea;
 
     if (coarseArea !== undefined) {
       const preciseLocation = planningAreaLocation(coarseArea);
@@ -88,6 +103,28 @@ export async function PATCH(req: Request) {
             weight: typeof cp.weight === "number" ? cp.weight : 0,
           }))
         );
+      }
+    }
+
+    if (originChanged || dietaryChanged || cuisineChanged) {
+      const participantRows = await db
+        .select({ id: schema.planParticipants.id, planId: schema.planParticipants.planId })
+        .from(schema.planParticipants)
+        .where(eq(schema.planParticipants.userId, user.id));
+      // A profile edit must not silently keep a participant ready. The next
+      // lobby submission has to explicitly review the changed input again.
+      await db.transaction(async (tx) => {
+        await tx
+          .update(schema.planParticipants)
+          .set({ isReady: 0, dietaryDeclared: dietaryChanged ? 0 : undefined })
+          .where(eq(schema.planParticipants.userId, user.id));
+      });
+      for (const participant of participantRows) {
+        await invalidatePlanDerivedState({
+          planId: participant.planId,
+          actorId: user.id,
+          reason: originChanged ? "profile_origin_changed" : dietaryChanged ? "dietary_rules_changed" : "cuisine_preferences_changed",
+        });
       }
     }
 

@@ -42,6 +42,62 @@ async function getPlan(request: APIRequestContext, planId: string) {
   };
 }
 
+const participantReadiness: Record<string, { area: string; startTime: string; endTime: string }> = {
+  user_maya: {
+    area: "Novena / Balestier (Central)",
+    startTime: "18:30",
+    endTime: "21:00",
+  },
+  user_ethan: {
+    area: "Jurong East / Clementi (West)",
+    startTime: "19:00",
+    endTime: "21:30",
+  },
+  user_clara: {
+    area: "Tampines / Pasir Ris (East)",
+    startTime: "18:45",
+    endTime: "21:15",
+  },
+};
+
+async function markAllParticipantsReady(request: APIRequestContext, planId: string) {
+  const plan = await getPlan(request, planId);
+  const organizer = plan.participants.find((participant) => participant.role === "organizer");
+  expect(organizer?.userId).toEqual(expect.any(String));
+
+  for (const participant of plan.participants) {
+    const userId = String(participant.userId);
+    const readiness = participantReadiness[userId];
+    expect(readiness, `missing readiness fixture for ${userId}`).toBeDefined();
+
+    await switchUser(request, userId);
+    const detailsResponse = await request.put(`/api/v1/plans/${planId}/participation`, {
+      data: {
+        coarseOriginLabel: readiness.area,
+        dietaryDeclared: true,
+        availability: [{
+          startTime: readiness.startTime,
+          endTime: readiness.endTime,
+          source: "manual",
+        }],
+      },
+    });
+    expect(detailsResponse.status(), `readiness details update failed for ${userId}`).toBe(200);
+
+    // Availability/origin edits intentionally clear readiness. Confirm the
+    // complete state in a second request once those details are persisted.
+    const readyResponse = await request.put(`/api/v1/plans/${planId}/participation`, {
+      data: { dietaryDeclared: true, isReady: true },
+    });
+    expect(readyResponse.status(), `readiness confirmation failed for ${userId}`).toBe(200);
+    expect((await readyResponse.json()).data).toMatchObject({ success: true, isReady: true });
+  }
+
+  await switchUser(request, String(organizer?.userId));
+  const readyPlan = await getPlan(request, planId);
+  expect(readyPlan.participants.every((participant) => participant.isReady === true), "every active participant must be ready").toBe(true);
+}
+
 test.describe("Hangtime API acceptance and privacy boundaries", () => {
   test("creates at most three participants and exposes no precise location fields", async ({ context }) => {
     const tooMany = await context.request.post("/api/v1/plans", {
@@ -81,6 +137,7 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
     const joinBody = {
       inviteToken: invite.token,
       coarseOriginLabel: "Tampines / Pasir Ris (East)",
+      dietaryDeclared: true,
       isReady: true,
       availability: [{ startTime: "18:30", endTime: "21:30", source: "manual" }],
     };
@@ -104,6 +161,7 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
     const first = await context.request.put(`/api/v1/plans/${planId}/participation`, {
       data: {
         coarseOriginLabel: "Novena / Balestier (Central)",
+        dietaryDeclared: true,
         isReady: true,
         availability: [
           { startTime: "18:30", endTime: "19:30", source: "manual" },
@@ -122,6 +180,7 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
 
     const malformed = await context.request.put(`/api/v1/plans/${planId}/participation`, {
       data: {
+        dietaryDeclared: true,
         isReady: true,
         availability: [{ startTime: "25:00", endTime: "26:00", source: "manual" }],
       },
@@ -130,6 +189,7 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
 
     const replacement = await context.request.put(`/api/v1/plans/${planId}/participation`, {
       data: {
+        dietaryDeclared: true,
         isReady: true,
         availability: [{ startTime: "19:00", endTime: "20:30", source: "manual" }],
       },
@@ -144,6 +204,7 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
 
   test("generates explainable recommendations without precise origins or unbounded links", async ({ context }) => {
     const planId = await createPlan(context.request);
+    await markAllParticipantsReady(context.request, planId);
     const recommendationResponse = await context.request.post(`/api/v1/plans/${planId}/recommendations`);
     expect(recommendationResponse.status()).toBe(200);
     const payload = (await recommendationResponse.json()).data as {
@@ -192,6 +253,7 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
 
   test("records organizer override reason and emits a private-location-free ICS download", async ({ context }) => {
     const planId = await createPlan(context.request);
+    await markAllParticipantsReady(context.request, planId);
     const generated = await context.request.post(`/api/v1/plans/${planId}/recommendations`);
     expect(generated.status()).toBe(200);
     const candidates = ((await generated.json()).data as { candidates: Array<{ id: string }> }).candidates;

@@ -132,7 +132,7 @@ function NewPlanForm() {
       <Card variant="default" className="space-y-3 rounded-none border-0 p-5 shadow-none sm:p-7">
         <div className="flex items-center justify-between border-b border-cream-200 pb-2">
           <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-terra-600" />
+            <Users aria-hidden="true" className="h-4 w-4 text-terra-600" />
             <h2 className="text-sm font-extrabold uppercase tracking-[0.12em] text-ink-900">
               1. Who&apos;s coming? ({totalDiners}/3 people)
             </h2>
@@ -185,63 +185,75 @@ function NewPlanForm() {
       {/* Step 2: Meal Type, Date & Time Window */}
       <Card variant="default" className="space-y-5 rounded-none border-0 p-5 shadow-none sm:p-7">
         <div className="flex items-center gap-2 border-b border-cream-200 pb-2">
-          <UtensilsCrossed className="h-4 w-4 text-terra-600" />
+            <UtensilsCrossed aria-hidden="true" className="h-4 w-4 text-terra-600" />
           <h2 className="text-sm font-extrabold uppercase tracking-[0.12em] text-ink-900">
             2. When & What?
           </h2>
         </div>
 
         {/* Meal Type Radio Grid */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-ink-700 block">Occasion</label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <fieldset className="space-y-1.5">
+            <legend id="occasion-label" className="text-xs font-semibold text-ink-700 block">Occasion</legend>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {MEAL_TYPES.map((mt) => {
               const isSelected = mealType === mt.id;
               const OccasionIcon = mt.icon;
               return (
-                <button
-                  type="button"
-                  key={mt.id}
-                  onClick={() => setMealType(mt.id)}
-                  aria-pressed={isSelected}
-                  className={`min-h-28 cursor-pointer border p-3 text-left transition-all ${
-                    isSelected
-                      ? "border-terra-500 bg-terra-50 shadow-[3px_3px_0_#e3472d]"
-                      : "border-ink-900/20 bg-cream-50 hover:border-terra-300"
+                <div key={mt.id}>
+                  <input
+                    id={`occasion-${mt.id}`}
+                    type="radio"
+                    name="mealType"
+                    value={mt.id}
+                    checked={isSelected}
+                    onChange={() => setMealType(mt.id)}
+                    className="peer sr-only"
+                  />
+                  <label
+                    htmlFor={`occasion-${mt.id}`}
+                    className={`min-h-28 cursor-pointer border p-3 text-left transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400 ${
+                      isSelected
+                        ? "border-terra-500 bg-terra-50 shadow-[3px_3px_0_#e3472d]"
+                        : "border-ink-900/20 bg-cream-50 hover:border-terra-300"
                   }`}
                 >
                   <OccasionIcon className="mb-4 h-5 w-5 text-terra-600" aria-hidden="true" />
                   <p className="text-xs font-extrabold uppercase tracking-wide text-ink-950">{mt.label}</p>
                   <p className="mt-1 text-xs text-ink-500">{mt.desc}</p>
-                </button>
+                  </label>
+                </div>
               );
             })}
-          </div>
-        </div>
+            </div>
+          </fieldset>
 
         {/* Date & Time Window Inputs */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label className="text-xs font-semibold text-ink-700 block mb-1">
+            <label htmlFor="plan-date" className="text-xs font-semibold text-ink-700 block mb-1">
               Date
             </label>
             <input
+              id="plan-date"
+              name="date"
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="min-h-11 w-full rounded-[2px] border border-ink-900/25 bg-cream-50 px-3 py-2 text-sm font-semibold text-ink-900 focus:border-terra-500 focus:outline-none"
+              className="min-h-11 w-full rounded-[2px] border border-ink-900/25 bg-cream-50 px-3 py-2 text-sm font-semibold text-ink-900 focus:border-terra-500"
               required
             />
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-ink-700 block mb-1">
+            <label htmlFor="window-start" className="text-xs font-semibold text-ink-700 block mb-1">
               Window Start
             </label>
             <select
+              id="window-start"
+              name="windowStart"
               value={windowStart}
               onChange={(e) => setWindowStart(e.target.value)}
-              className="min-h-11 w-full rounded-[2px] border border-ink-900/25 bg-cream-50 px-3 py-2 text-sm font-semibold text-ink-900 focus:border-terra-500 focus:outline-none"
+              className="min-h-11 w-full rounded-[2px] border border-ink-900/25 bg-cream-50 px-3 py-2 text-sm font-semibold text-ink-900 focus:border-terra-500"
             >
               {["11:30", "12:00", "12:30", "13:00", "18:00", "18:30", "19:00", "19:30", "20:00"].map((t) => (
                 <option key={t} value={t}>
@@ -252,13 +264,15 @@ function NewPlanForm() {
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-ink-700 block mb-1">
+            <label htmlFor="window-end" className="text-xs font-semibold text-ink-700 block mb-1">
               Window End
             </label>
             <select
+              id="window-end"
+              name="windowEnd"
               value={windowEnd}
               onChange={(e) => setWindowEnd(e.target.value)}
-              className="min-h-11 w-full rounded-[2px] border border-ink-900/25 bg-cream-50 px-3 py-2 text-sm font-semibold text-ink-900 focus:border-terra-500 focus:outline-none"
+              className="min-h-11 w-full rounded-[2px] border border-ink-900/25 bg-cream-50 px-3 py-2 text-sm font-semibold text-ink-900 focus:border-terra-500"
             >
               {["13:30", "14:00", "14:30", "20:30", "21:00", "21:30", "22:00", "22:30"].map((t) => (
                 <option key={t} value={t}>
@@ -282,7 +296,7 @@ function NewPlanForm() {
         {/* Total Budget Slider */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-ink-700">
+            <label htmlFor="group-budget" className="text-xs font-semibold text-ink-700">
               Total Group Budget (SGD)
             </label>
             <span className="font-display text-base font-bold text-terra-600">
@@ -293,6 +307,8 @@ function NewPlanForm() {
             </span>
           </div>
           <input
+            id="group-budget"
+            name="groupBudget"
             type="range"
             min="40"
             max="400"
@@ -311,7 +327,7 @@ function NewPlanForm() {
         {/* Alcohol Toggle */}
         <div className="flex items-center justify-between border-y border-ink-900/20 bg-cream-100/60 p-3">
           <div className="flex items-center gap-2.5">
-            <Wine className="h-4 w-4 text-plum-700" />
+            <Wine aria-hidden="true" className="h-4 w-4 text-plum-700" />
             <div>
               <p className="text-xs font-bold text-ink-900">Include Drinks / Alcohol?</p>
               <p className="text-[10px] text-ink-500">
@@ -322,6 +338,8 @@ function NewPlanForm() {
           <button
             type="button"
             onClick={() => setAlcoholMode(alcoholMode === "included" ? "excluded" : "included")}
+            aria-pressed={alcoholMode === "included"}
+            aria-label="Include drinks and alcohol"
             className={`min-h-11 border px-3 py-1.5 text-xs font-bold uppercase tracking-wide transition-all ${
               alcoholMode === "included"
                 ? "bg-plum-700 text-white shadow-soft"
@@ -333,48 +351,64 @@ function NewPlanForm() {
         </div>
 
         {/* Travel Fairness Mode Selector */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-ink-700 block">
+        <fieldset className="space-y-1.5">
+          <legend id="fairness-label" className="text-xs font-semibold text-ink-700 block">
             Travel Fairness Priority
-          </label>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Travel fairness priority">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={fairnessMode === "equal_journeys"}
-              onClick={() => setFairnessMode("equal_journeys")}
-              className={`min-h-28 border p-4 text-left transition-all ${
+          </legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div>
+              <input
+                id="fairness-equal-journeys"
+                type="radio"
+                name="fairnessMode"
+                value="equal_journeys"
+                checked={fairnessMode === "equal_journeys"}
+                onChange={() => setFairnessMode("equal_journeys")}
+                className="peer sr-only"
+              />
+              <label
+                htmlFor="fairness-equal-journeys"
+                className={`min-h-28 cursor-pointer border p-4 text-left transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400 ${
                 fairnessMode === "equal_journeys"
                   ? "border-terra-500 bg-terra-50 shadow-[3px_3px_0_#e3472d]"
                   : "border-ink-900/20 bg-cream-50 hover:border-terra-300"
               }`}
             >
-              <Scale className="h-4 w-4 text-terra-600 mb-1" />
+              <Scale aria-hidden="true" className="h-4 w-4 text-terra-600 mb-1" />
               <p className="text-xs font-bold text-ink-950">Fairest Journeys</p>
               <p className="text-[10px] text-ink-500 mt-0.5">
                 Equalizes MRT/bus travel time so no one takes a disproportionately long trip.
               </p>
-            </button>
+              </label>
+            </div>
 
-            <button
-              type="button"
-              role="radio"
-              aria-checked={fairnessMode === "lowest_total_time"}
-              onClick={() => setFairnessMode("lowest_total_time")}
-              className={`min-h-28 border p-4 text-left transition-all ${
+            <div>
+              <input
+                id="fairness-lowest-total-time"
+                type="radio"
+                name="fairnessMode"
+                value="lowest_total_time"
+                checked={fairnessMode === "lowest_total_time"}
+                onChange={() => setFairnessMode("lowest_total_time")}
+                className="peer sr-only"
+              />
+              <label
+                htmlFor="fairness-lowest-total-time"
+                className={`min-h-28 cursor-pointer border p-4 text-left transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-terra-400 ${
                 fairnessMode === "lowest_total_time"
                   ? "border-terra-500 bg-terra-50 shadow-[3px_3px_0_#e3472d]"
                   : "border-ink-900/20 bg-cream-50 hover:border-terra-300"
               }`}
             >
-              <Zap className="h-4 w-4 text-amber-900 mb-1" />
+              <Zap aria-hidden="true" className="h-4 w-4 text-amber-900 mb-1" />
               <p className="text-xs font-bold text-ink-950">Fastest Group Trip</p>
               <p className="text-[10px] text-ink-500 mt-0.5">
                 Minimizes total combined transit time across all participants.
               </p>
-            </button>
+              </label>
+            </div>
           </div>
-        </div>
+        </fieldset>
       </Card>
 
       {/* Submit Button */}

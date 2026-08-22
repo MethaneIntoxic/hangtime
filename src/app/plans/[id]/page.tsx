@@ -134,8 +134,8 @@ export default function PlanRoomPage({
     return (
       <div className="min-h-dvh bg-cream-50">
         <Header />
-        <div className="py-24 text-center space-y-2">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-terra-500 border-t-transparent" />
+        <div role="status" aria-live="polite" aria-label="Loading meal plan" className="py-24 text-center space-y-2">
+          <div aria-hidden="true" className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-terra-500 border-t-transparent" />
           <p className="text-xs text-ink-500 font-medium">Loading meal plan…</p>
         </div>
       </div>
@@ -171,15 +171,16 @@ export default function PlanRoomPage({
         <div className="flex items-center justify-between">
           <Link
             href="/"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-600 hover:text-ink-950 transition-colors"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-ink-600 transition-colors hover:text-ink-950"
           >
             <ArrowLeft className="h-4 w-4" />
             <span>Home</span>
           </Link>
 
           <button
+            type="button"
             onClick={loadPlanData}
-            className="flex items-center gap-1 text-xs text-ink-500 hover:text-ink-800 transition-colors cursor-pointer"
+            className="flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs text-ink-500 transition-colors hover:text-ink-800 cursor-pointer"
             title="Refresh plan status"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -187,15 +188,18 @@ export default function PlanRoomPage({
           </button>
         </div>
 
-        <nav className="brand-rule overflow-x-auto bg-ink-950 px-4 py-3 text-cream-50" aria-label="Plan progress">
+        <nav tabIndex={0} className="brand-rule overflow-x-auto bg-ink-950 px-4 py-3 text-cream-50" aria-label="Plan progress">
           <ol className="grid min-w-[560px] grid-cols-5 gap-2">
             {journeyLabels.map((label, index) => {
               const complete = index < journeyStep;
               const current = index === journeyStep;
               return (
-                <li key={label} className="relative flex items-center gap-2">
-                  <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[10px] font-extrabold ${complete ? "border-sage-500 bg-sage-600 text-white" : current ? "border-terra-400 bg-terra-500 text-white" : "border-white/35 text-cream-300"}`}>{complete ? "✓" : index + 1}</span>
-                  <span className={`text-[10px] font-extrabold uppercase tracking-[0.14em] ${current ? "text-terra-300" : "text-cream-200"}`}>{label}</span>
+                <li key={label} aria-current={current ? "step" : undefined} className="relative flex items-center gap-2">
+                  <span aria-hidden="true" className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[10px] font-extrabold ${complete ? "border-sage-500 bg-sage-600 text-white" : current ? "border-terra-400 bg-terra-500 text-white" : "border-white/35 text-cream-300"}`}>{complete ? "✓" : index + 1}</span>
+                  <span className={`text-[10px] font-extrabold uppercase tracking-[0.14em] ${current ? "text-terra-300" : "text-cream-200"}`}>
+                    <span className="sr-only">{complete ? "Completed: " : current ? "Current: " : "Upcoming: "}</span>
+                    {label}
+                  </span>
                 </li>
               );
             })}
@@ -233,6 +237,7 @@ export default function PlanRoomPage({
             isOrganizer={isOrganizer}
             onGenerateRecommendations={handleGenerateRecommendations}
             isGenerating={isGenerating}
+            onReadinessSaved={loadPlanData}
           />
         )}
       </main>
