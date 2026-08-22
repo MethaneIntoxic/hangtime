@@ -2,13 +2,14 @@
 
 ## Outcome
 
-The Iteration 2 local acceptance suite passes and the product/UAT contract remains traceable across 23 prioritized stories. Production code deployment is complete at commit `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97`, deployment `dpl_3f1KRgiWZGKBfFWrG1RhueypL5Gv`, with immutable URL `https://hangtime-ks7dyo48w-hangtime1.vercel.app` and alias `https://hangtime-weld.vercel.app`. Authenticated deployed end-to-end and Preview provisioning remain pending. This run does not claim that GitHub-hosted jobs executed: GitHub rejected every job before its first step because of the account's existing billing/spending restriction. No billing setting, paid plan, scheduled runner, or deployment quota was enabled.
+The Iteration 3 local acceptance gates pass and the pending-seat/migration hardening is deployed at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`, deployment `dpl_7cDkRk38gbSNUuBQjHR36k5SgP35`, immutable URL `https://hangtime-h4fmk7skg-hangtime1.vercel.app`, and alias `https://hangtime-weld.vercel.app`. Production Turso 0006 postconditions are verified (`m5=1`, `m6=1`, `columns=6`, `indexes=3`, `invite_rows preserved=0`). Local gates include `18 files/96 unit` and `50 E2E passed` with `2` intentional viewport-conditional skips; production smoke is `1 pass`, and build/lint/typecheck/PWA/maps/security checks pass. Live health returned 200 for the exact revision with security headers, and rendered sign-in showed no console errors.
+
+This evidence does not claim authenticated deployed end-to-end or a real email resend. Preview remains unprovisioned; physical-device, backup/restore, and other external integration evidence remain open. The raw invite-token continuation path remains a hardening recommendation because it duplicates a bearer token in a continuation query; intended-account binding and body/header-only acceptance remain active controls. GitHub-hosted CI did not execute because of an existing account-level Actions restriction; no hosted CI pass is claimed and billing is not enabled.
 
 ## Sources and environments
 
-- Reviewed source: the Iteration 2 working tree based on `925cedf3d7190bd5775f7adbad8ae7e8b32b9ad1`; local source gates are recorded separately from deployed authenticated acceptance.
-- Deployed application source: `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97`.
-- Production immutable deployment: `https://hangtime-ks7dyo48w-hangtime1.vercel.app` (`dpl_3f1KRgiWZGKBfFWrG1RhueypL5Gv`).
+- Reviewed source and deployed application source: Iteration 3 commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`.
+- Production immutable deployment: `https://hangtime-h4fmk7skg-hangtime1.vercel.app` (`dpl_7cDkRk38gbSNUuBQjHR36k5SgP35`).
 - Production alias: `https://hangtime-weld.vercel.app`.
 - Local browser fixtures: isolated seeded SQLite/libSQL data; no production mutation or email delivery.
 - Production data: Turso Free, separate from Preview; Preview remains empty/unprovisioned.
@@ -20,9 +21,10 @@ The reviewed working tree includes readiness, plan-validity, accessibility, migr
 | Gate | Result | Evidence |
 |---|---|---|
 | Lint and TypeScript | Pass | ESLint and `tsc --noEmit` both completed successfully |
-| Unit/security/domain tests | Pass | 17 files, 79 tests |
-| Full E2E browser UAT | Pass with two intentional project-conditional skips | 42 passed, 2 skipped across desktop/mobile Chromium |
-| Production smoke/security contract | Pass for current alias deployment | Authenticated Vercel curl checks returned the exact deployed revision; health, sign-in, landing, manifest, and service worker returned HTTP 200; unauthenticated `/api/v1/me` returned 401; invalid magic-link returned 400; cross-origin unsafe POST returned 403; same-origin sign-out returned 200; HSTS and CSP were present. Full authenticated deployed end-to-end remains pending. |
+| Unit/security/domain tests | Pass | 18 files, 96 tests |
+| Full E2E browser UAT | Pass with two intentional viewport-conditional skips | 50 passed, 2 skipped across desktop/mobile Chromium |
+| Production smoke/security contract | Pass | 1 pass; live health returned 200 for the exact deployed revision with security headers. Full authenticated deployed end-to-end remains pending. |
+| Rendered production sign-in | Pass | Sign-in rendered without console errors; authenticated completion remains pending. |
 | Next.js production build | Pass | Next.js 16.3.1 production build |
 | PWA/map static policy | Pass | `PWA_STATIC_CHECK_PASS`, `MAP_CHECK_PASS` |
 | CI workflow policy | Pass | `CI_POLICY_PASS workflows=7` |
@@ -33,18 +35,18 @@ The reviewed working tree includes readiness, plan-validity, accessibility, migr
 | Migration hardening | Pass | The explicit migration preflights four duplicate identity classes transactionally before unique indexes; local migration tests pass |
 | Diff hygiene | Pass | `git diff --check` |
 
-New acceptance coverage includes deliberate readiness UI, required readiness evidence, readiness and derived-state invalidation, version-conflict safety, idempotent concurrent recommendation generation, stale ballot/confirmation rejection, deployable migration integrity, axe checks across primary routes, keyboard interaction, dialog focus restoration, and 320/390/430px ballot-action geometry. Earlier coverage for three-person capacity and concurrent final-seat handling does not implement pending-invite seat reservation; DT-003 and DT-004 therefore remain incomplete.
+New acceptance coverage includes pending-invite seat reservation, intended-account acceptance, revocation/reissue/expiry, capacity and final-seat races, safe projections, deliberate readiness UI, required readiness evidence, readiness and derived-state invalidation, version-conflict safety, idempotent concurrent recommendation generation, stale ballot/confirmation rejection, deployable migration integrity, axe checks across primary routes, keyboard interaction, dialog focus restoration, and 320/390/430px ballot-action geometry. DT-003 and DT-004 local implementation gates pass; the complete authenticated deployed journey remains a release gate.
 
 ## Sealed security diff scan
 
-Security diff scan `a3d5047a-6725-4799-aa8e-c418f14f1cb1` completed and sealed at `2026-08-22T10:44:49Z` against the pre-remediation snapshot. It covered all 33 changed source files in the working-tree diff, with focused tests passing and no production credentials or production database used. The scan retained two reportable low-severity integrity findings. Remediation is now implemented and verified in the current working tree. Production code deployment is complete at commit `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97`; authenticated deployed behavior remains pending:
+Security diff scan `a3d5047a-6725-4799-aa8e-c418f14f1cb1` completed and sealed at `2026-08-22T10:44:49Z` against the pre-remediation snapshot. It covered all 33 changed source files in the working-tree diff, with focused tests passing and no production credentials or production database used. The scan retained two reportable low-severity integrity findings. Remediation is now implemented, verified locally, and deployed at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`; authenticated deployed behavior remains pending:
 
 | Finding | Severity / CWE | Sealed-snapshot disposition | Local remediation status |
 |---|---|---|---|
 | Equivalent profile preference reordering invalidates shared plans (`csf_f86680152ec33535ed29cc66`) | Low · CWE-20, CWE-400 | Reportable; authenticated-user, recoverable shared-plan disruption | Canonical preference-set comparison is implemented and order-invariance tests pass locally; Production code is deployed at the recorded commit, while authenticated deployed behavior remains pending. |
 | Equivalent availability reordering invalidates shared plan state (`csf_1e24511cf1424f2e54bad434`) | Low · CWE-20, CWE-400 | Reportable; authenticated-participant, recoverable shared-plan disruption | Canonical availability-window comparison is implemented and order-invariance tests pass locally; Production code is deployed at the recorded commit, while authenticated deployed behavior remains pending. |
 
-The scan suppressed a route-local CSRF candidate because the production proxy applies the exact-origin check to unsafe `/api/:path*` requests; this remains a production-proxy deployment assumption, not a route-level fix. It also retained the omitted-availability readiness behavior as a correctness/state-integrity follow-up rather than a security finding: the participation route can persist `isReady` when availability is omitted, but the recommendation path revalidates persisted availability and rejects generation. The sealed local diff review did not cover the remote Turso migration or deployed authenticated UAT; the former now has separate postcondition evidence, while the latter remains pending.
+The scan suppressed a route-local CSRF candidate because the production proxy applies the exact-origin check to unsafe `/api/:path*` requests; this remains a production-proxy deployment assumption, not a route-level fix. It also retained the omitted-availability readiness behavior as a correctness/state-integrity follow-up rather than a security finding: the participation route can persist `isReady` when availability is omitted, but the recommendation path revalidates persisted availability and rejects generation. The sealed local diff review did not cover the remote Turso migration or deployed authenticated UAT; the former now has separate postcondition evidence, while the latter remains pending. Raw invite-token continuation is a hardening recommendation, not a reportable finding, because acceptance binds the token to the intended account and does not accept it from the URL alone.
 
 ## Production Turso migration evidence
 
@@ -52,21 +54,21 @@ The Production Turso migration gate is **complete** for the read-only postcondit
 
 | Postcondition | Result |
 |---|---:|
-| Dietary column present | `1` |
-| Migration marker present | `1` |
-| Integrity indexes present | `4` |
-| Duplicate identity groups | `0` |
-| `private_locations` preserved | `1` |
+| Migration marker 0005 (`m5`) | `1` |
+| Migration marker 0006 (`m6`) | `1` |
+| 0006 compatibility columns | `6` |
+| 0006 indexes | `3` |
+| `invite_rows` preserved | `0` affected |
 
 No secret rotation, data deletion, paid feature, or Preview migration was performed. The Preview database remains empty/unprovisioned. This completes the Production migration gate only; Production code deployment is complete at the recorded commit, while authenticated deployed UAT and Preview provisioning remain pending.
 
 ## Current deployed Production verification
 
-Authenticated Vercel curl health returned the exact revision `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97` for alias `https://hangtime-weld.vercel.app`. The alias checks returned health/sign-in/landing/manifest/service-worker 200, unauthenticated `/api/v1/me` 401, invalid magic-link 400, cross-origin unsafe POST 403, and same-origin sign-out 200. HSTS and CSP were present. The service-worker response was `public, must-revalidate, max-age=0`. This is deployment and security-boundary evidence, not the pending authenticated deployed end-to-end journey.
+Live health returned the exact revision `13e01c559daa1fbe6b11c0d16057f7db54ae18d5` with HTTP 200 and security headers for alias `https://hangtime-weld.vercel.app`. Production smoke passed; rendered sign-in had no console errors. This is deployment and security-boundary evidence, not the pending authenticated deployed end-to-end journey, and no real email was re-sent in this run.
 
 ## Earlier rendered production verification
 
-This evidence applies to the prior `96b3fbc8b8630360ad491aef866a0e98822e92b6` deployment and is retained as historical evidence for that revision only. The safe flow under test was: production sign-in loads → an empty submit is attempted → the required email field receives focus without navigation or network-side email delivery.
+The detailed viewport checks below are retained as historical evidence for the earlier production revision. For the current immutable deployment, the in-app browser separately verified that production sign-in rendered without console errors; no submit or email delivery was triggered during that check.
 
 - Page identity and meaningful DOM: pass at `/sign-in?next=%2F` with title `Hangtime`.
 - Framework overlay: none observed.
@@ -77,7 +79,7 @@ This evidence applies to the prior `96b3fbc8b8630360ad491aef866a0e98822e92b6` de
 - Mobile visual: pass at 390×844 Chromium without clipping or horizontal overflow.
 - In-app Browser screenshot capture: blocked by repeated `Page.captureScreenshot` timeout; repository Playwright Chromium was used only for screenshot evidence.
 - WebKit/Safari: not executed because the local WebKit binary is not installed; this remains a physical-device/manual gate.
-- Real authentication email: manually confirmed working by the product owner during this session. This proves the current Resend authentication-email path only, not plan-event notification delivery.
+- Real authentication email: manually confirmed working by the product owner earlier in this session, but not re-sent during this release check. Plan-event notification delivery remains an external gate.
 
 ## CI/CD safeguards added
 
@@ -91,17 +93,18 @@ This evidence applies to the prior `96b3fbc8b8630360ad491aef866a0e98822e92b6` de
 
 ## Remote runner evidence
 
-Production deployment evidence is recorded independently of GitHub-hosted jobs. CI run `32569601604` and Security run `32569601613` were rejected before their first steps because of the account billing/spending restriction; deployment workflow run `32569605762` was skipped. None of these remote jobs is claimed as passed. The local results above and the authenticated Vercel curl checks are the current executable evidence.
+Production deployment evidence is recorded independently of GitHub-hosted jobs. CI run `32586781902` and Security run `32586781895` failed before any steps because of the existing account-level Actions restriction; deployment workflow run `32586786167` was skipped. Billing is not enabled, and none of these remote jobs is claimed as passed. The local results above and the production smoke checks are the current executable evidence.
 
 ## Remaining acceptance gates
 
 1. Exercise the complete authenticated deployed create/invite/join/readiness/recommend/map/vote/confirm/acknowledge flow with disposable tester identities and real magic-link delivery; authenticated deployed end-to-end remains pending.
 2. Provision isolated Preview database/deployment and run its authenticated UAT; Preview remains empty/unprovisioned.
-3. Implement pending-invite seat reservation and prove the complete three-independent-session journey; the current final-seat race alone does not close DT-003/DT-004.
+3. The pending-invite seat reservation and final-seat race pass locally; prove the complete three-independent-session journey against the deployed revision.
 4. Capture physical Android Chrome and iOS Safari install, launch, upgrade, and private-offline-cache evidence.
 5. Verify deployed Turso ciphertext canaries, key rotation, PITR restore, and a user-controlled encrypted backup destination.
 6. Validate live OneMap routing/geocoding quotas and accuracy before describing transit estimates as authoritative.
 7. Implement and prove plan-event notification delivery; current evidence covers authentication email only.
 8. Re-run GitHub-hosted CI if the account restriction is resolved without enabling unwanted spending.
+9. Harden raw invite-token continuation so a bearer token is not duplicated in continuation query state before broader release.
 
-Production code deployment is complete at commit `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97` on the recorded immutable URL and alias. Broader/public release readiness remains partial until authenticated deployed end-to-end, Preview provisioning, and the remaining external gates above have direct evidence.
+Production code deployment is complete at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5` on the recorded immutable URL and alias. Broader/public release readiness remains partial until authenticated deployed end-to-end, Preview provisioning, and the remaining external gates above have direct evidence.

@@ -19,7 +19,7 @@ The current MVP recommends restaurants, cafes, and bars. The Hangtime name leave
 
 The acceptance contract describes the release target; it does not turn an unexecuted integration into a pass. The current repository is a Next.js PWA using Drizzle over local SQLite for development and remote Turso/libSQL for Vercel Preview/Production. Vercel is the only supported remote hosting path for this MVP. Alternate hosted-database, container-registry, and continuously running worker paths are not part of the current deployment contract.
 
-The current source build has a production magic-link path and a test email outbox, but the Iteration 2 working tree is not the live Production revision. Remote Turso migration, an authenticated deployed journey with account-owned Resend delivery, backup/restore, and physical-device evidence remain pre-release gates. The recommendation path currently uses a deterministic curated Singapore catalogue and synchronous generation. MapLibre/OpenFreeMap is optional and must always have a ranked-list fallback.
+Iteration 3 is deployed at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5` (deployment `dpl_7cDkRk38gbSNUuBQjHR36k5SgP35`) at the immutable URL `https://hangtime-h4fmk7skg-hangtime1.vercel.app` with alias `https://hangtime-weld.vercel.app`. Production Turso 0006 postconditions are verified (`m5=1`, `m6=1`, `columns=6`, `indexes=3`, `invite_rows preserved=0`), and the local and production-smoke gates are recorded in the dated UAT results. An authenticated deployed journey with account-owned Resend delivery, Preview provisioning, backup/restore, and physical-device evidence remain pre-release gates; this plan therefore separates locally executable acceptance from production/manual proof. The recommendation path currently uses a deterministic curated Singapore catalogue and synchronous generation. MapLibre/OpenFreeMap is optional and must always have a ranked-list fallback.
 
 Notification preferences and a `notification_outbox` table are present as product seams, but a delivery worker/API for plan invitations, confirmation, reminders, and Web Push is not currently verified. The source of truth is the in-app plan state. A confirmation action must not be reported as an email or push delivery until DT-011 has direct delivery evidence. Authentication email is the only currently implemented transactional email path when Resend is configured.
 
@@ -191,7 +191,7 @@ Priority is attached to the stable story ID so that a release report can disting
 - **Given** a manual share link is requested, **when** the response is inspected, **then** it is `no-store`, includes only one invite URL (no separate token field), and no token appears in events, participant projections, analytics, caches, or test artifacts.
 
 **Edge cases:** revoke/accept and reissue/accept races; existing member opens invite; clipboard denied; email casing; sign-in return path; link scanner opens URL before recipient; expired reservations freeing capacity.
-**Coverage:** Partial — current tests cover the legacy core lifecycle and one same-token race; pending reservations, revocation/reissue, two-token contention, safe projections, and rendered recovery states are Iteration 3 targets. Link-scanner behavior remains planned.
+**Coverage:** Automated/local Iteration 3 evidence is complete for pending reservations, revocation/reissue, two-token contention, safe projections, and rendered recovery states across the focused reservation/migration/plan-mutation suites and API/browser suites (`18 files/96 unit tests`; `50 E2E passed` with `2` intentional viewport-conditional skips). The production smoke confirms the unauthenticated boundary, but the authenticated deployed journey remains pending. Link-scanner behavior and raw invite-token continuation hardening remain planned.
 
 ### Feature HT-F3.2 — Participant check-in
 
@@ -207,7 +207,7 @@ Priority is attached to the stable story ID so that a release report can disting
 - **Given** date, window, origin, budget, or a hard dietary rule changes after readiness or recommendation, **then** affected readiness, recommendation run, and ballots are invalidated with an explanation.
 
 **Edge cases:** participant removes location; calendar connection fails; strict rule added after voting; two tabs change readiness; organizer is the incomplete participant.  
-**Coverage:** Automated in source — `tests/unit/readiness-invalidation.test.ts`, `tests/unit/plan-mutations.test.ts`, `tests/e2e/readiness-ui.spec.ts`, and `tests/e2e/api-acceptance.spec.ts` cover required evidence, deliberate readiness, invalidation, and stale-write rejection. Remote Turso migration and the deployed authenticated journey remain run-level pre-release evidence gates.
+**Coverage:** Automated in source — `tests/unit/readiness-invalidation.test.ts`, `tests/unit/plan-mutations.test.ts`, `tests/e2e/readiness-ui.spec.ts`, and `tests/e2e/api-acceptance.spec.ts` cover required evidence, deliberate readiness, invalidation, and stale-write rejection. Production Turso 0006 postconditions and one production smoke pass are recorded; the deployed authenticated journey and backup/restore remain run-level pre-release evidence gates.
 
 ## 8. Epic HT-E4 — Explainable Singapore shortlist
 
@@ -261,7 +261,7 @@ Priority is attached to the stable story ID so that a release report can disting
 - **Given** the map is not the active view, **when** service-worker and network traffic are inspected, **then** cross-origin tiles are not prefetched, bulk-downloaded, or cached.
 
 **Edge cases:** CSP denial; style loads but tiles fail; WebGL unavailable; zero/one candidate; overlapping markers; keyboard zoom; reduced motion; offline installed PWA.  
-**Coverage:** Partial — `tests/unit/open-map.test.ts`, `scripts/check-maps.mjs`, browser list/map tests, and `tests/e2e/accessibility.spec.ts` cover static policy, core parity, primary keyboard controls, and fallback accessibility. Outbound request canaries, complete marker-order evidence, attribution screenshots, and deployed outage behavior still require full evidence.
+**Coverage:** Automated/static and deployed-smoke evidence is recorded. The map uses live external data only after the MapLibre map is loaded and tiles are loaded; otherwise a visible OSM iframe fallback is shown while shortlist/ballot semantics remain usable. Live-provider outage evidence, attribution screenshots on every target device, and physical-device rendering remain manual gates.
 
 ### Feature HT-F5.2 — Formula-capped, independent voting
 
@@ -389,7 +389,7 @@ Priority is attached to the stable story ID so that a release report can disting
 - **Given** the runtime is production-equivalent, **when** identity controls initialize, **then** the demo identity switcher and demo sessions are rejected.
 
 **Edge cases:** replay; token tamper; external return URL; cross-origin mutation; revoked session; email case normalization; rate-limit race.  
-**Coverage:** Automated for core controls — `tests/unit/production-auth.test.ts`, auth security tests, and adversarial browser tests; live email delivery remains external/manual.
+**Coverage:** Automated for core controls — `tests/unit/production-auth.test.ts`, auth security tests, and adversarial browser tests; live health returned 200 for the exact deployed revision with security headers and rendered sign-in completed without console errors. Real email delivery and authenticated completion remain external/manual.
 
 ### Feature HT-F8.2 — No plaintext precise origins
 
@@ -406,7 +406,7 @@ Priority is attached to the stable story ID so that a release report can disting
 - **Given** a backup is restored or a key is rotated, **when** evidence is collected, **then** every retained backup has its required key available separately and passes integrity/canary checks.
 
 **Edge cases:** legacy migration; old plaintext snapshot; wrong/retired key; interrupted rotation; app crash during write; account/plan deletion.  
-**Coverage:** Partial — location crypto/migration/environment unit suites exist; release requires the database/WAL/backups/browser/log canary verifier against the deployed environment.
+**Coverage:** Partial — location crypto/migration/environment unit suites exist and Production Turso 0006 postconditions are recorded; release still requires the database/WAL/backups/browser/log canary verifier against the deployed environment.
 
 ### Feature HT-F8.3 — Public-only PWA behavior
 
@@ -577,12 +577,13 @@ Screenshots must be inspected for the intended state; a blank, loading, stale, c
 
 ## 19. External/manual gates that must remain explicit
 
-- Real transactional email delivery, bounce behavior, and domain authentication.
+- Real transactional email delivery, bounce behavior, and domain authentication; the current run did not re-send a real email.
 - Real OneMap accuracy, token renewal, quotas, and representative Singapore routes.
 - OpenFreeMap live availability and terms; fixture success does not prove the public service.
 - Physical iOS Safari and Android Chrome install/offline behavior.
 - Real calendar OAuth/free-busy behavior if Calendar integration is enabled.
 - Real web-push permission/delivery behavior if push is enabled.
 - Hosting-environment encrypted backup/restore, key rotation, deployment protection, and rollback.
+- Authenticated deployed end-to-end acceptance, Preview provisioning, and raw invite-token continuation hardening before broader release.
 
 An unavailable external account/device is a named blocker, not a passing result and not something a stub may substitute for.

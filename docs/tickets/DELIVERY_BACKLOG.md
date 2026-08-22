@@ -32,18 +32,18 @@ Created from UAT runs `UAT-2026-08-17-01` through `UAT-2026-08-21` and architect
 | DT-009 | In progress | Server validation now rejects empty/duplicate/unaccepted companions, invalid windows, invalid budget and invalid enums. Intentional direct-page selection and meal-aware time defaults remain. |
 | DT-014 | In progress | CSP/HSTS, revision-aware smoke, actionlint, isolated Turso environments, staged Vercel promotion and shared deploy locks are added. Live GitHub/Vercel/Turso evidence remains. |
 
-## Progress update — 2026-08-22, Iteration 2
+## Progress update — 2026-08-22, Iteration 3 production evidence
 
 | Ticket | Status | New evidence |
 |---|---|---|
-| DT-003 | In progress | Three-person capacity and a concurrent final-seat race are automated, but one complete plan has not yet been driven by three independent authenticated sessions. Pending invitations also do not reserve a seat. |
-| DT-004 | In progress | Core acceptance, one-time reuse rejection, capacity, and final-seat concurrency have coverage. The required pending-invite reservation redesign, complete unsafe-token matrix, and deployed email-bound journey remain open. |
-| DT-005 | Source acceptance and low-finding remediation verified locally; Production migration and code-deployment gates complete; authenticated gate pending | Deliberate readiness requires origin, overlapping availability, and dietary confirmation. Material participant/plan edits atomically clear readiness and delete stale runs/ballots; stale confirmations and ballots fail, and concurrent generation converges on one run. Canonical ordering comparisons and order-invariance tests now address both sealed low findings in source. Production Turso migration and code deployment are complete; deployed authenticated acceptance remains a pre-release gate. |
+| DT-003 | Implemented/deployed; authenticated gate pending | Pending reservations, intended-account binding, accept/reissue/revoke lifecycle, capacity, and concurrent tests pass locally; the full authenticated deployed three-actor journey remains pending. |
+| DT-004 | Implemented/deployed; authenticated gate pending | Bound token lifecycle, safe projections, reissue/revoke, and race tests pass locally; raw token continuation hardening and the authenticated deployed journey remain limitations. |
+| DT-005 | Implemented/deployed; authenticated gate pending | Deliberate readiness requires origin, overlapping availability, and dietary confirmation. Material participant/plan edits atomically clear readiness and delete stale runs/ballots; stale confirmations and ballots fail, and concurrent generation converges on one run. Production smoke and map fallback evidence pass; deployed authenticated acceptance remains a pre-release gate. |
 | DT-006 | Complete in automated source scope; physical review pending | Axe reports no serious/critical violations across home, create, lobby, voting, confirm, feedback, profile, and join fixtures. Keyboard selection, radio navigation, Escape/focus restoration, live semantics, and 320/390/430px mobile action geometry are automated. Physical screen-reader, forced-colors, 200% zoom, iOS, and Android evidence remains part of release UAT. |
 
 ## Sealed security diff follow-up — 2026-08-22
 
-Scan `a3d5047a-6725-4799-aa8e-c418f14f1cb1` is complete and sealed against the pre-remediation snapshot, with complete coverage of 33 changed source files. It produced two reportable low-severity findings. Both are now remediated in the current source and verified locally. Production code deployment is complete at commit `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97`; authenticated deployed behavior remains pending.
+Scan `a3d5047a-6725-4799-aa8e-c418f14f1cb1` is complete and sealed against the pre-remediation snapshot, with complete coverage of 33 changed source files. It produced two reportable low-severity findings. Both are now remediated in the current source and verified locally. Iteration 3 remediation is deployed at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`; authenticated production proof and the raw invite-token continuation hardening recommendation remain pending.
 
 | Finding | Affected path | Status | Remediation |
 |---|---|---|---|
@@ -54,13 +54,13 @@ The scan also recorded two suppressed follow-ups. The apparent missing route-loc
 
 ## Production deployment evidence — 2026-08-22
 
-Production code deployment: **Complete** at commit `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97`, deployment `dpl_3f1KRgiWZGKBfFWrG1RhueypL5Gv`, immutable URL `https://hangtime-ks7dyo48w-hangtime1.vercel.app`, and alias `https://hangtime-weld.vercel.app`. Authenticated Vercel curl health returned the exact revision. Alias evidence: health, sign-in, landing, manifest, and service worker returned 200; unauthenticated `/api/v1/me` returned 401; invalid magic-link returned 400; cross-origin unsafe POST returned 403; same-origin sign-out returned 200; HSTS and CSP were present; service-worker cache was `public, must-revalidate, max-age=0`.
+Production code deployment: **Complete** at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`, deployment `dpl_7cDkRk38gbSNUuBQjHR36k5SgP35`, immutable URL `https://hangtime-h4fmk7skg-hangtime1.vercel.app`, and alias `https://hangtime-weld.vercel.app`. Live health returned 200 for the exact revision with security headers, and rendered sign-in had no console errors. Production smoke passed; the full authenticated deployed journey remains pending.
 
-CI run `32569601604` and Security run `32569601613` were rejected before steps by the account billing/spending restriction. Deployment workflow run `32569605762` was skipped. These remote jobs are not claimed as passed. Authenticated deployed end-to-end and Preview provisioning remain pending.
+CI run `32586781902` and Security run `32586781895` failed before any steps because the existing account-level Actions restriction is active and billing is not enabled. Deployment workflow run `32586786167` was skipped. These remote jobs are not claimed as passed. Authenticated deployed end-to-end and Preview provisioning remain pending.
 
 ## DT-001 — Production email authentication
 
-Problem: the production magic-link/session path is implemented in the repository, and the Production deployment/smoke boundary is now evidenced, but account-owned Resend controls and the complete authenticated live sign-in journey are not yet proven. The demo switcher remains local-only and is not evidence for beta.
+Problem: the production magic-link/session path is implemented in the repository, and the Production deployment/smoke boundary is now evidenced, but account-owned Resend controls and the complete authenticated live sign-in journey are not yet proven. The rendered sign-in had no console errors, but no real email was re-sent in this run. The demo switcher remains local-only and is not evidence for beta.
 
 Acceptance criteria:
 
@@ -75,7 +75,7 @@ Acceptance criteria:
 
 Problem: local SQLite is appropriate only for development and legacy conversion tooling; Vercel must use remote Turso/libSQL with protected migrations. Precise origins must remain envelope-encrypted through migration, backup, restore, and key rotation.
 
-Production Turso migration gate: **Complete**. An authenticated Turso SQL console applied the migration one statement at a time because sensitive Vercel secrets are non-readable to the CLI. Read-only postconditions are: dietary column `1`, migration marker `1`, integrity indexes `4`, duplicate identity groups `0`, and `private_locations` preserved `1`. No secret rotation, data deletion, paid feature, or Preview migration was performed. The Preview database remains empty/unprovisioned; Production code deployment is complete at commit `ac06b5ed5f59b9ac3f234cd46c101a7e9537db97`, while authenticated deployed UAT remains pending. This closes the Production migration gate only, not the full backup, restore, key-rotation, Preview, or deployed-UAT ticket.
+Production Turso migration gate: **Complete**. An authenticated Turso SQL console applied 0006 as one explicitly selected transactional batch because sensitive Vercel secrets are non-readable to the CLI. Read-only 0006 postconditions are: `m5=1`, `m6=1`, `columns=6`, `indexes=3`, and `invite_rows preserved=0`. No secret rotation, data deletion, paid feature, or Preview migration was performed. The Preview database remains empty/unprovisioned; Production code deployment is complete at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`, while authenticated deployed UAT remains pending. This closes the Production migration gate only, not the full backup, restore, key-rotation, Preview, or deployed-UAT ticket.
 
 Acceptance criteria:
 
@@ -115,9 +115,9 @@ Acceptance criteria:
 
 ## DT-005 — Readiness and recommendation validity
 
-Status: **Source acceptance and remediation of the two sealed low findings are complete in the checked-out source; the Production Turso migration and code-deployment gates are complete, while deployed authenticated acceptance remains a pre-release gate.**
+Status: **Source acceptance and remediation of the two sealed low findings are complete and deployed at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`; the Production Turso migration and smoke gates are complete, while deployed authenticated acceptance remains a pre-release gate.**
 
-Resolved behavior: recommendation generation now requires every active participant to have a private origin, overlapping availability, an explicit dietary declaration, and deliberate ready state. Material edits atomically invalidate readiness, recommendations, candidates, and ballots; version checks prevent stale writes; concurrent duplicate generation returns the single committed run.
+Resolved behavior: recommendation generation now requires every active participant to have a private origin, overlapping availability, an explicit dietary declaration, and deliberate ready state. Material edits atomically invalidate readiness, recommendations, candidates, and ballots; version checks prevent stale writes; concurrent duplicate generation returns the single committed run. Production smoke and the map fallback boundary pass; authenticated deployed end-to-end remains open.
 
 Acceptance criteria:
 
