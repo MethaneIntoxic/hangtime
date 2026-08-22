@@ -15,7 +15,7 @@ const keyring = getLocationKeyring();
 const client = createClient({ url, authToken });
 
 try {
-  await initDatabase(client);
+  await initDatabase(client, { applyLocalPragmas: false });
   const integrity = await client.execute("PRAGMA integrity_check");
   if (integrity.rows.length !== 1 || integrity.rows[0].integrity_check !== "ok") {
     throw new Error("Remote database integrity check failed.");

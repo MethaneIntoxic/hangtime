@@ -6,9 +6,20 @@ function isBusy(error: unknown): boolean {
   return candidate.code === "SQLITE_BUSY" || candidate.rawCode === 5 || /database is locked/i.test(error.message);
 }
 
-export async function initDatabase(client: Client): Promise<void> {
-  await client.execute("PRAGMA busy_timeout = 10000");
-  await client.execute("PRAGMA foreign_keys = ON");
+export type DatabaseInitOptions = {
+  applyLocalPragmas?: boolean;
+};
+
+export async function initDatabase(
+  client: Client,
+  { applyLocalPragmas = true }: DatabaseInitOptions = {},
+): Promise<void> {
+  // These connection-level pragmas are useful for local SQLite files, but
+  // Turso's HTTP/libSQL endpoint rejects them during remote migrations.
+  if (applyLocalPragmas) {
+    await client.execute("PRAGMA busy_timeout = 10000");
+    await client.execute("PRAGMA foreign_keys = ON");
+  }
   for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
       await client.executeMultiple(`
