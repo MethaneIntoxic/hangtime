@@ -115,3 +115,20 @@ export function stripPrivateLocationFields<
   delete safeRecord.lng;
   return safeRecord as Omit<T, "postalCode" | "lat" | "lng">;
 }
+
+/**
+ * Participant projections may include the caller's own account details, but
+ * never expose another diner's email or notification settings.
+ */
+export function stripParticipantProfileFields<T extends object>(
+  record: T,
+  viewerUserId: string,
+  profileUserId: string,
+): Omit<T, "postalCode" | "lat" | "lng" | "email" | "notificationPrefs"> {
+  const safeRecord = stripPrivateLocationFields(record) as Record<string, unknown>;
+  if (viewerUserId !== profileUserId) {
+    delete safeRecord.email;
+    delete safeRecord.notificationPrefs;
+  }
+  return safeRecord as Omit<T, "postalCode" | "lat" | "lng" | "email" | "notificationPrefs">;
+}

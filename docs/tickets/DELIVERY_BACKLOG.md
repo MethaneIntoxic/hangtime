@@ -108,6 +108,10 @@ Acceptance criteria:
 - Join captures required dietary rules, coarse origin, and availability before readiness.
 - Missing, unknown, expired, reused, wrong-email, concurrent-use, and fourth-participant attempts fail closed without plan details.
 - Invite tokens never appear in CI artifacts, analytics, referrers, caches, or server logs.
+- Saved companion selections reserve seats but do not create participants until intended-account acceptance.
+- Accepted participants plus live pending reservations never exceed three under creation, reissue, expiry, revocation, and concurrent acceptance.
+- Organizer-safe pending-seat projections expose copy/reissue/revoke recovery without returning token hashes, separate raw token fields, participant emails, or notification preferences.
+- Automated email/push delivery is not claimed until DT-011 has a durable dispatcher and receipts; manual link sharing is labeled truthfully.
 
 ## DT-005 — Readiness and recommendation validity
 

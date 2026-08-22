@@ -1,8 +1,14 @@
+import crypto from "node:crypto";
+
 export interface PlanInviteForValidation {
   planId: string;
   email?: string | null;
+  intendedEmailHash?: string | null;
+  reservedUserId?: string | null;
   expiresAt: string;
   acceptedAt?: string | null;
+  revokedAt?: string | null;
+  supersededByInviteId?: string | null;
 }
 
 export type InviteValidationResult =
@@ -13,13 +19,21 @@ export type InviteValidationResult =
         | "INVALID_INVITE"
         | "INVITE_EXPIRED"
         | "INVITE_ALREADY_USED"
-        | "INVITE_EMAIL_MISMATCH";
+        | "INVITE_EMAIL_MISMATCH"
+        | "INVITE_UNAVAILABLE";
       message: string;
     };
 
 export function validatePlanInvite(
   invite: PlanInviteForValidation | null | undefined,
-  context: { planId: string; userEmail: string; nowMs?: number }
+  context: {
+    planId: string;
+    userEmail: string;
+    userId?: string;
+    intendedEmailHash?: string;
+    requireBound?: boolean;
+    nowMs?: number;
+  }
 ): InviteValidationResult {
   if (!invite || invite.planId !== context.planId) {
     return {
@@ -34,6 +48,47 @@ export function validatePlanInvite(
       code: "INVITE_ALREADY_USED",
       message: "This invitation has already been used.",
     };
+  }
+
+  if (invite.revokedAt || invite.supersededByInviteId) {
+    return {
+      valid: false,
+      code: "INVITE_UNAVAILABLE",
+      message: "This invitation is no longer available.",
+    };
+  }
+
+  if (context.requireBound && !invite.intendedEmailHash) {
+    return {
+      valid: false,
+      code: "INVITE_UNAVAILABLE",
+      message: "This invitation is no longer available.",
+    };
+  }
+  if (invite.reservedUserId && invite.reservedUserId !== context.userId) {
+    return {
+      valid: false,
+      code: "INVITE_UNAVAILABLE",
+      message: "This invitation is no longer available.",
+    };
+  }
+  if (invite.intendedEmailHash) {
+    if (!context.intendedEmailHash) {
+      return {
+        valid: false,
+        code: "INVITE_UNAVAILABLE",
+        message: "This invitation is no longer available.",
+      };
+    }
+    const expected = Buffer.from(invite.intendedEmailHash, "utf8");
+    const actual = Buffer.from(context.intendedEmailHash, "utf8");
+    if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+      return {
+        valid: false,
+        code: "INVITE_UNAVAILABLE",
+        message: "This invitation is no longer available.",
+      };
+    }
   }
 
   const expiresAtMs = Date.parse(invite.expiresAt);
@@ -76,6 +131,9 @@ export function extractInviteToken(
     if (token) return token;
   }
 
-  const queryToken = new URL(request.url).searchParams.get("inviteToken")?.trim();
-  return queryToken || null;
+  // Never accept invite secrets from query strings: URLs leak through browser
+  // history, referrers, proxy logs, and copied diagnostics. The join page
+  // submits the token in the JSON body; trusted server callers may use one of
+  // the explicit headers above.
+  return null;
 }

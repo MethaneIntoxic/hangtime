@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, CalendarDays, Clock3, MapPin, ShieldCheck, Utensils } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
@@ -18,53 +18,133 @@ type InvitePreview = {
   organizerDisplayName: string;
 };
 
+type SafeInviteError = {
+  code: string;
+  title: string;
+  message: string;
+  action: "sign-in" | "retry" | "home";
+};
+
+class InviteFlowError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+  }
+}
+
+function safeInviteError(code: string, status: number): SafeInviteError {
+  if (code === "UNAUTHORIZED" || status === 401) {
+    return {
+      code,
+      title: "Sign in to accept this invitation",
+      message: "Sign in with the account this invitation was sent to, then return here to finish joining.",
+      action: "sign-in",
+    };
+  }
+  if (code === "INVITE_EMAIL_MISMATCH") {
+    return {
+      code,
+      title: "This invitation is for a different account",
+      message: "Switch to the intended account to accept this invitation. No plan details were shared.",
+      action: "sign-in",
+    };
+  }
+  if (code === "INVITE_EXPIRED") {
+    return { code, title: "This invitation has expired", message: "Ask the organizer to reissue the invitation link.", action: "home" };
+  }
+  if (code === "INVITE_REVOKED") {
+    return { code, title: "This invitation was revoked", message: "Ask the organizer for a new invitation if you still want to join.", action: "home" };
+  }
+  if (code === "INVITE_ALREADY_USED" || code === "INVITE_SUPERSEDED" || code === "INVITE_UNAVAILABLE") {
+    return { code, title: "This invitation is no longer available", message: "It has already been used or replaced. Ask the organizer for help.", action: "home" };
+  }
+  if (code === "GROUP_FULL") {
+    return { code, title: "This plan is full", message: "The organizer needs to open another seat or start a new plan.", action: "home" };
+  }
+  if (code === "PLAN_UNAVAILABLE") {
+    return { code, title: "This plan is no longer accepting diners", message: "Ask the organizer if there is another plan to join.", action: "home" };
+  }
+  if (["INVALID_INVITE", "INVITE_REQUIRED"].includes(code)) {
+    return { code, title: "Invitation unavailable", message: "This invitation link is invalid or no longer available.", action: "home" };
+  }
+  return {
+    code,
+    title: "Invitation unavailable",
+    message: "We could not check this invitation. Try again, or return home and open the link again.",
+    action: "retry",
+  };
+}
+
+function errorFromPayload(payload: { error?: { code?: string; message?: string } } | null, status: number) {
+  return safeInviteError(payload?.error?.code || "UNKNOWN", status);
+}
+
 export default function JoinPlanPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const router = useRouter();
   const { toast } = useToast();
   const [invite, setInvite] = useState<InvitePreview | null>(null);
-  const [loadError, setLoadError] = useState("");
-  const [guestName, setGuestName] = useState("");
+  const [loadError, setLoadError] = useState<SafeInviteError | null>(null);
   const [selectedArea, setSelectedArea] = useState("Tampines / Pasir Ris (East)");
+  const hasSelectedAreaRef = useRef(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [joinError, setJoinError] = useState<SafeInviteError | null>(null);
+
+  const loadInvite = useCallback(async () => {
+    setInvite(null);
+    setLoadError(null);
+    try {
+      const response = await fetch(`/api/v1/invites/${encodeURIComponent(token)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setLoadError(errorFromPayload(payload, response.status));
+        return;
+      }
+      setInvite(payload?.data?.plan ?? null);
+    } catch {
+      setLoadError(safeInviteError("UNKNOWN", 0));
+    }
+  }, [token]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadInvite(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadInvite]);
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/v1/invites/${encodeURIComponent(token)}`, { cache: "no-store" })
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error?.message ?? "This invitation could not be opened.");
-        if (active) setInvite(payload.data.plan);
-      })
-      .catch((error: Error) => {
-        if (active) setLoadError(error.message);
-      });
+    const timer = window.setTimeout(() => {
+      void fetch("/api/v1/me", { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) return null;
+          return response.json().catch(() => null);
+        })
+        .then((payload: { data?: { profile?: { coarseArea?: unknown } } } | null) => {
+          const profileArea = payload?.data?.profile?.coarseArea;
+          const supportedArea = SINGAPORE_PLANNING_AREAS.find((area) => area.label === profileArea)?.label;
+          if (active && !hasSelectedAreaRef.current && supportedArea) {
+            setSelectedArea(supportedArea);
+          }
+        })
+        .catch(() => {
+          // The fallback remains usable when the optional profile read fails.
+        });
+    }, 0);
+
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
-  }, [token]);
+  }, []);
 
   const handleJoin = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!invite) return;
     setIsJoining(true);
+    setJoinError(null);
 
     try {
       const area = SINGAPORE_PLANNING_AREAS.find((item) => item.label === selectedArea);
-      if (!area) throw new Error("Choose a valid Singapore area.");
-
-      const profileResponse = await fetch("/api/v1/me/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          displayName: guestName,
-          coarseArea: selectedArea,
-        }),
-      });
-      if (!profileResponse.ok) {
-        const payload = await profileResponse.json();
-        throw new Error(payload.error?.message ?? "Your diner profile could not be saved.");
-      }
+      if (!area) throw new InviteFlowError("INVALID_INPUT", "Choose a valid Singapore area.");
 
       const joinResponse = await fetch(`/api/v1/plans/${invite.id}/participation`, {
         method: "PUT",
@@ -74,13 +154,19 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
           coarseOriginLabel: selectedArea,
         }),
       });
-      const payload = await joinResponse.json();
-      if (!joinResponse.ok) throw new Error(payload.error?.message ?? "You could not join this plan.");
+      const payload = await joinResponse.json().catch(() => null);
+      if (!joinResponse.ok) {
+        throw new InviteFlowError(payload?.error?.code || "UNKNOWN", payload?.error?.message || "You could not join this plan.");
+      }
 
-      toast("You're in. Let's find a table.", "success");
+      toast("You're in — finish your check-in.", "success");
       router.replace(`/plans/${invite.id}`);
     } catch (error) {
-      toast(error instanceof Error ? error.message : "You could not join this plan.", "error");
+      const safeError = error instanceof InviteFlowError
+        ? safeInviteError(error.code, 0)
+        : safeInviteError("UNKNOWN", 0);
+      setJoinError(safeError);
+      toast(safeError.message, "error");
     } finally {
       setIsJoining(false);
     }
@@ -100,9 +186,23 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
 
         {loadError ? (
           <section className="mt-8 border border-berry-500/30 bg-berry-100 p-6 text-center" role="alert">
-            <h2 className="font-display text-xl font-semibold text-berry-700">Invitation unavailable</h2>
-            <p className="mt-2 text-sm leading-6 text-ink-700">{loadError}</p>
-            <Button variant="outline" size="md" className="mt-5" onClick={() => router.push("/")}>Return home</Button>
+            <h2 className="font-display text-xl font-semibold text-berry-700">{loadError.title}</h2>
+            <p className="mt-2 text-sm leading-6 text-ink-700">{loadError.message}</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {loadError.action === "sign-in" && (
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => router.push(`/sign-in?next=${encodeURIComponent(`/join/${token}`)}`)}
+                >
+                  Continue to sign in
+                </Button>
+              )}
+              {loadError.action === "retry" && (
+                <Button variant="primary" size="md" onClick={() => void loadInvite()}>Try again</Button>
+              )}
+              <Button variant="outline" size="md" onClick={() => router.push("/")}>Return home</Button>
+            </div>
           </section>
         ) : !invite ? (
           <div role="status" aria-live="polite" aria-busy="true" className="mt-8 h-80 animate-pulse-soft border border-ink-900/15 bg-cream-100" aria-label="Checking invitation" />
@@ -117,16 +217,35 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
               </div>
             </div>
 
-            <form onSubmit={handleJoin} className="mt-6 space-y-5">
-              <div>
-                <label htmlFor="guest-name" className="mb-2 block text-sm font-bold text-ink-800">What should we call you?</label>
-                <input id="guest-name" name="guestName" value={guestName} onChange={(event) => setGuestName(event.target.value)} required autoComplete="name" placeholder="Jordan" className="min-h-12 w-full border border-ink-900/20 bg-cream-50 px-4 text-sm text-ink-950 focus:border-terra-600" />
-              </div>
+            <form onSubmit={handleJoin} className="mt-6 space-y-5" aria-describedby={joinError ? "join-error" : undefined}>
+              {joinError && (
+                <div id="join-error" role="alert" className="border border-berry-500/30 bg-berry-100 px-4 py-3 text-sm text-berry-800">
+                  <p className="font-semibold">{joinError.title}</p>
+                  <p className="mt-1">{joinError.message}</p>
+                  {joinError.action === "retry" && (
+                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => setJoinError(null)}>
+                      Try again
+                    </Button>
+                  )}
+                </div>
+              )}
+              <p className="border border-ink-900/15 bg-cream-100 px-4 py-3 text-sm leading-6 text-ink-700">
+                You&apos;re joining with your signed-in Hangtime profile. Profile maintenance stays separate from accepting this invitation.
+              </p>
               <div>
                 <label htmlFor="origin-area" className="mb-2 block text-sm font-bold text-ink-800">Where will you travel from?</label>
                 <div className="relative">
                   <MapPin className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-terra-600" aria-hidden="true" />
-                  <select id="origin-area" name="originArea" value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)} className="min-h-12 w-full appearance-none border border-ink-900/20 bg-cream-50 pl-10 pr-4 text-sm text-ink-950 focus:border-terra-600">
+                  <select
+                    id="origin-area"
+                    name="originArea"
+                    value={selectedArea}
+                    onChange={(event) => {
+                      hasSelectedAreaRef.current = true;
+                      setSelectedArea(event.target.value);
+                    }}
+                    className="min-h-12 w-full appearance-none border border-ink-900/20 bg-cream-50 pl-10 pr-4 text-sm text-ink-950 focus:border-terra-600"
+                  >
                     {SINGAPORE_PLANNING_AREAS.map((area) => <option key={area.label} value={area.label}>{area.label}</option>)}
                   </select>
                 </div>

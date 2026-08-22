@@ -7,6 +7,21 @@ function isBusy(error: unknown): boolean {
   return candidate.code === "SQLITE_BUSY" || candidate.rawCode === 5 || /database is locked/i.test(error.message);
 }
 
+async function executeMultipleWithBusyRetry(
+  client: Pick<Client, "executeMultiple">,
+  sql: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      await client.executeMultiple(sql);
+      return;
+    } catch (error) {
+      if (!isBusy(error) || attempt === 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+
 export type DatabaseInitOptions = {
   applyLocalPragmas?: boolean;
 };
@@ -20,6 +35,7 @@ export async function initDatabase(
   if (applyLocalPragmas) {
     await client.execute("PRAGMA busy_timeout = 10000");
     await client.execute("PRAGMA foreign_keys = ON");
+    await client.execute("PRAGMA journal_mode = WAL");
   }
   for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
@@ -100,9 +116,6 @@ export async function initDatabase(
       joined_at TEXT NOT NULL
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS plan_participants_plan_user_uq
-      ON plan_participants(plan_id, user_id);
-
     CREATE TABLE IF NOT EXISTS plan_invites (
       id TEXT PRIMARY KEY,
       plan_id TEXT NOT NULL,
@@ -110,6 +123,12 @@ export async function initDatabase(
       token_hash TEXT NOT NULL UNIQUE,
       expires_at TEXT NOT NULL,
       accepted_at TEXT,
+      reservation_kind TEXT,
+      reserved_user_id TEXT,
+      intended_email_hash TEXT,
+      revoked_at TEXT,
+      accepted_user_id TEXT,
+      superseded_by_invite_id TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
@@ -329,7 +348,7 @@ export async function initDatabase(
 
   // Brand/provider migration: rewrite only legacy public venue links. Exact
   // participant origins are never included in these outbound URLs.
-  await client.executeMultiple(`
+  await executeMultipleWithBusyRetry(client, `
     UPDATE recommendation_candidates
     SET maps_url =
       'https://www.openstreetmap.org/?mlat=' || printf('%.6f', lat) ||

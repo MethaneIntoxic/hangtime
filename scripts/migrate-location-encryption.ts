@@ -54,7 +54,9 @@ try {
       throw new Error(`${table} is not the expected legacy plaintext schema.`);
     }
   }
-  await initDatabase(target);
+  // The target is copied as a single SQLite file below. Do not enable local
+  // WAL pragmas here, or schema/data may remain in the sidecar during copy.
+  await initDatabase(target, { applyLocalPragmas: false });
   const sourceTables = new Set(tables(legacy));
   const targetTables = (await target.execute(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",

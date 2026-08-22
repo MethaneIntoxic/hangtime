@@ -106,6 +106,12 @@ export function OpenSingaporeMap({
         });
         mapRef.current = map;
 
+        const markMapReady = () => {
+          if (cancelled || !map.loaded() || !map.areTilesLoaded()) return;
+          if (loadTimeout) clearTimeout(loadTimeout);
+          setMapStatus("ready");
+        };
+
         const failMap = (message: string) => {
           if (cancelled) return;
           if (loadTimeout) clearTimeout(loadTimeout);
@@ -113,13 +119,13 @@ export function OpenSingaporeMap({
           setMapStatus("failed");
         };
 
-        map.once("load", () => {
-          if (cancelled) return;
-          if (loadTimeout) clearTimeout(loadTimeout);
-          setMapStatus("ready");
-        });
+        // A style response alone can produce a blank WebGL canvas while vector
+        // tiles are still pending. Only expose the live map after MapLibre has
+        // rendered all requested viewport tiles; idle covers a late tile settle.
+        map.once("load", markMapReady);
+        map.once("idle", markMapReady);
         map.on("error", () => failMap("The map provider or WebGL renderer reported an error."));
-        loadTimeout = setTimeout(() => failMap("The live map took too long to load."), 10_000);
+        loadTimeout = setTimeout(() => failMap("The live map took too long to load."), 15_000);
         map.addControl(new NavigationControl({ showCompass: false }), "top-right");
 
         markersRef.current = validVenues.map((venue) => {

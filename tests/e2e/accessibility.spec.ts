@@ -68,7 +68,12 @@ test.describe("Accessibility contract", () => {
     await expectNoSeriousA11yViolations(page, "feedback dialog");
 
     await openAndAudit(page, "/profile", "profile", "Profile & Preferences");
-    await openAndAudit(page, "/join/accessibility-invalid-token", "join", "Invitation unavailable");
+    await openAndAudit(
+      page,
+      "/join/accessibility-invalid-token",
+      "join",
+      /Invitation unavailable|This invitation is no longer available/,
+    );
   });
 
   test("keeps primary controls keyboard-complete", async ({ page }) => {

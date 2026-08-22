@@ -254,8 +254,8 @@ The current schema uses application-generated text IDs (for example `user_*`, `p
 | Table | Essential fields and rules |
 |---|---|
 | `plans` | Organizer, state, version, date, window start/end, meal type, group budget cents, alcohol flag, fairness mode, timezone, shortlist size config, timestamps. |
-| `plan_participants` | Plan, optional full-profile user, verified guest user, role, coarse origin label, ready/acknowledgement state; unique member; database constraint enforces 2–3 active members. |
-| `plan_invites` | Plan, intended-email hash, token hash, expiry, accepted/revoked timestamps, creator; server-only read. |
+| `plan_participants` | Accepted plan members only: plan, verified profile/guest user, role, coarse origin label, ready/acknowledgement state, and join timestamp. `(plan_id, user_id)` is unique. Existing legacy members remain valid. A selected companion is never inserted here before accepting. |
+| `plan_invites` | The server-only seat-reservation ledger: plan, reservation kind, optional reserved profile ID, HMAC intended-email hash, token hash, expiry, accepted/revoked/superseded timestamps, accepting user, creator, and timestamps. A live reservation is a bound reservation that is unaccepted, unrevoked, unexpired, and belongs to a joinable plan. New reservations are always bound to an intended account/email; preserved pre-0006 unbound legacy rows remain revocable but cannot claim or reissue a seat and do not consume capacity. |
 | `availability_windows` | Participant, plan, start/end, source manual/calendar, derived-at timestamp; only windows intersecting the plan are retained. |
 | `recommendation_runs` | Plan/version, algorithm version, status, encrypted private input snapshot, provider timestamps, weights, quota usage, failure code, expiry. |
 | `recommendation_candidates` | Run, rank, provider/venue ID, category badges, display fields, travel/price/dietary evidence, booking/map links, and explanation. Provider-derived display data is cached with explicit provenance/verification limits. |
@@ -279,6 +279,7 @@ The current schema uses application-generated text IDs (for example `user_*`, `p
 ### Retention
 
 - Guest invite token: until accepted/revoked/expired; maximum 72 hours.
+- Group capacity is enforced transactionally as `accepted participants + live reservations <= 3`. Expired, revoked, and accepted reservations do not consume a pending seat. Reissue atomically revokes the old reservation and creates its replacement without a transient free or overbooked seat.
 - Unaccepted guest planning data: delete 30 days after plan cancellation/expiry.
 - Raw/derived calendar free/busy intervals (when the optional connector is enabled): delete after the plan completes plus 24 hours.
 - Encrypted origin snapshot: delete 30 days after plan completion; keep only journey durations and coarse areas for analytics.
@@ -393,9 +394,12 @@ The release target is for all JSON endpoints to validate with Zod, require CSRF-
 | `PATCH /api/v1/me/profile` | Display name, coarse planning area, dietary/cuisine preferences, and notification settings; the server stores the mapped precise origin privately. | Implemented |
 | `GET /api/v1/geocode?q=...` | Search the supported Singapore planning-area catalogue; only public/coarse labels are returned. | Implemented with local catalogue; authoritative provider planned |
 | `POST /api/v1/companions/invites` | Invite a verified email to become a saved companion. | Implemented (lifecycle limits tracked by DT-012) |
-| `POST /api/v1/plans` | Create a draft with date/window/meal/budget/travel mode. | Implemented |
-| `POST /api/v1/plans/:id/invites` | Create expiring, intended-email-bound plan invite. | Implemented; transactional invite delivery planned |
-| `PUT /api/v1/plans/:id/participation` | Submit plan-specific origin, availability, dietary confirmation, and deliberate readiness. Material changes atomically clear readiness and invalidate derived recommendation/ballot state. | Implemented and covered locally; remote Turso/deployed journey remains a release gate |
+| `POST /api/v1/plans` | In one write transaction create the plan, organizer member/location, one email/account-bound pending seat per selected accepted companion, and safe events. Selected companions are not active members before acceptance. | Iteration 3 implementation target |
+| `GET /api/v1/plans/:id/invites` | Organizer-only status projection containing invite ID, display label, seat/delivery state, and expiry; never token hash, raw token, full email, or private plan inputs. | Iteration 3 implementation target |
+| `POST /api/v1/plans/:id/invites` | Reserve a remaining seat for a verified intended email/account. Capacity and duplicate target checks occur in one write transaction. | Iteration 3 implementation target; automated delivery deferred |
+| `POST /api/v1/plans/:id/invites/:inviteId/reissue` | Atomically revoke/supersede one pending reservation and create a replacement. An explicit manual-share response may return one `inviteUrl` once with `Cache-Control: no-store`; it never returns a separate token field. | Iteration 3 implementation target |
+| `DELETE /api/v1/plans/:id/invites/:inviteId` | Organizer-only revocation of a still-pending reservation; accepted/terminal reservations fail with stable `409`. | Iteration 3 implementation target |
+| `PUT /api/v1/plans/:id/participation` | Atomically claim one live, intended-account/email-bound reservation, insert exactly one active participant, save private location/availability, and consume the reservation; or update an existing member's deliberate readiness. Material changes invalidate derived state. | Iteration 3 lifecycle target; readiness path implemented |
 | `POST /api/v1/plans/:id/recommendations` | Validate every participant's readiness evidence and create one versioned run; concurrent retries converge on the committed run. The current MVP completes the deterministic curated run synchronously. | Implemented and covered locally; durable async worker planned |
 | `GET /api/v1/plans/:id/recommendations/:runId` | Poll queued/running/ready/failed state. | Planned |
 | `POST /api/v1/plans/:id/voting/open` | Organizer freezes current run and opens voting. | Implemented |
@@ -444,7 +448,7 @@ The transaction verifies plan state, frozen run, caller membership, unique short
 2. **Profile setup:** display name, planning area, cuisines, dietary hard rules/preferences, default budget.
 3. **Returning home:** `Needs your action` before passive plans; shared-pass rows expose readiness, ballot, or acknowledgement action. First-time empty state carries the fuller product explanation.
 4. **Create plan / Set up:** explicit participants, food/drink occasion, date/window, budget/alcohol, and accessible fairness radio group. No companion is silently committed without a visible selected state.
-5. **Plan lobby / Check in:** one checklist for location, availability, and dietary review; readiness is deliberate, participant-safe, and invalidated by material changes.
+5. **Plan lobby / Check in:** an organizer-safe `People & seats` roster distinguishes `Invite pending`, `Joined · check-in needed`, and `Ready`; pending seats expose copy/reissue/revoke recovery without implying delivery. Accepted participants get one checklist for location, availability, and dietary review; readiness is deliberate, participant-safe, and invalidated by material changes.
 6. **Finding places:** real, announced progress (`checking fair areas`, `finding suitable venues`, `estimating journeys`) with idempotent retry/cancel rather than decorative timed progress alone.
 7. **Shortlist:** explainable candidate rows plus optional MapLibre map; journey imbalance, group budget, suitability evidence/confidence, provenance, booking, and OpenStreetMap actions.
 8. **Voting:** one ballot across list/map, selected count versus formula cap, aggregates hidden before first submission, explicit saved/unsaved state, tie and completion state.
@@ -461,6 +465,8 @@ The transaction verifies plan state, frozen run, caller membership, unique short
 - Venue closed/fully booked after confirmation: `Replace venue` reruns the same constraints excluding the failed place.
 - Push denied: the in-app plan remains the source of truth; email is only a fallback after the Resend path is provisioned and a delivery receipt exists.
 - Invitation email bounced: until DT-011 is implemented, the organizer sees the in-app invite state rather than a false delivery claim; the release target adds bounded resend/status after rate limiting.
+- Invitation terminal states: wrong account, expired, revoked, reused, closed plan, and a lost capacity race use safe, non-enumerating copy with a sign-in/home recovery path. A pending reservation never grants plan access and never appears as an accepted participant.
+- Manual link sharing: copying/reissuing is an explicit organizer action. Clipboard failure preserves the same displayed link for retry and must not silently create another reservation. Query-string invite tokens are not accepted.
 - Participant changed inputs: warn that current recommendations and ballots will be invalidated.
 - Dashboard request failed: distinguish failure from a genuinely empty plan list and expose retry.
 - Voting incomplete: tell the organizer exactly how many eligible ballots are missing before an explicit early lock-in.
@@ -602,6 +608,22 @@ hangtime/
 - Implement in-app event feed and Resend invitation/reminder templates.
 
 **Exit:** two users and one verified guest can reach `participants_ready` without sharing exact origins.
+
+### Iteration 3 execution graph — pending seat reservations
+
+```text
+T0 Frozen reservation/API contract
+├─ T1 additive schema + migration + legacy tests
+│  └─ T2 transactional reservation helpers
+│     ├─ T3 atomic plan creation + invite lifecycle routes
+│     └─ T4 atomic acceptance + participant-safe projections
+├─ T5 organizer/invitee lobby and join states
+└─ T6 unit/API/E2E/accessibility fixtures
+
+T3 + T4 + T5 + T6 -> T7 full gates -> T8 isolated migration -> T9 deployment smoke
+```
+
+Iteration 3 definition of done: saved companion selection creates a live reservation but no member; accepted plus live reserved seats never exceed three under concurrency; only the intended signed-in account can accept; revoke/reissue is atomic; organizer projections contain no bearer secret or private profile fields; recommendation generation requires at least two accepted ready participants; legacy active members remain unchanged; migration, unit, API, browser, accessibility, build, PWA, map, security, and production-safe smoke gates pass before promotion.
 
 ### Phase 3 — recommendation engine (6–9 days)
 

@@ -16,6 +16,7 @@ async function createPlan(
   companionIds: string[] = ["user_ethan"],
   mealType: "brunch" | "coffee" | "lunch" | "dinner" | "drinks" = "dinner",
 ) {
+  await switchUser(request, "user_maya");
   const response = await request.post("/api/v1/plans", {
     data: {
       mealType,
@@ -29,7 +30,17 @@ async function createPlan(
     },
   });
   expect(response.status()).toBe(201);
-  return ((await response.json()).data as { planId: string }).planId;
+  const planId = ((await response.json()).data as { planId: string }).planId;
+  const created = await getPlan(request, planId);
+  expect(created.participants).toHaveLength(1);
+  expect(created.participants[0]).toMatchObject({ userId: "user_maya", role: "organizer" });
+  expect(created.pendingInvites).toHaveLength(companionIds.length);
+  expect(created.seatSummary).toMatchObject({
+    joined: 1,
+    pending: companionIds.length,
+    available: 2 - companionIds.length,
+  });
+  return planId;
 }
 
 async function getPlan(request: APIRequestContext, planId: string) {
@@ -39,7 +50,100 @@ async function getPlan(request: APIRequestContext, planId: string) {
     participants: Array<Record<string, unknown>>;
     currentRun?: { candidates?: Array<Record<string, unknown>> };
     activeDecision?: Record<string, unknown>;
+    pendingInvites?: Array<{
+      id: string;
+      displayName: string;
+      status: string;
+      expiresAt: string;
+    }>;
+    seatSummary?: { joined: number; pending: number; available: number };
   };
+}
+
+async function currentCompanionDisplayNames(
+  request: APIRequestContext,
+  companionIds: string[],
+): Promise<Map<string, string>> {
+  const response = await request.get("/api/v1/companions");
+  expect(response.status()).toBe(200);
+  const companions = (await response.json()).data.companions as Array<{
+    companionId: string;
+    displayName: string;
+  }>;
+  const byId = new Map(companions.map((companion) => [companion.companionId, companion.displayName]));
+  for (const companionId of companionIds) {
+    expect(byId.has(companionId), `missing current companion record for ${companionId}`).toBe(true);
+  }
+  return byId;
+}
+
+function tokenFromInviteUrl(inviteUrl: unknown): string {
+  if (typeof inviteUrl !== "string") {
+    throw new Error("reissue did not return an invitation URL");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(inviteUrl);
+  } catch {
+    throw new Error("reissue returned an invalid invitation URL");
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const token = segments[0] === "join" && segments.length === 2 ? segments[1] : undefined;
+  if (!token || token.length < 32 || parsed.search || parsed.hash) {
+    throw new Error("reissue returned an invalid invitation URL shape");
+  }
+  return token;
+}
+
+async function reissueInviteToken(request: APIRequestContext, planId: string, inviteId: string): Promise<string> {
+  const response = await request.post(`/api/v1/plans/${planId}/invites/${inviteId}/reissue`);
+  expect(response.status()).toBe(200);
+  const data = (await response.json()).data as { inviteUrl?: unknown };
+  return tokenFromInviteUrl(data.inviteUrl);
+}
+
+async function acceptSelectedCompanions(
+  request: APIRequestContext,
+  planId: string,
+  companionIds: string[],
+) {
+  await switchUser(request, "user_maya");
+  const plan = await getPlan(request, planId);
+  const pendingInvites = plan.pendingInvites ?? [];
+  const companionNames = await currentCompanionDisplayNames(request, companionIds);
+  const tokens: string[] = [];
+
+  for (const userId of companionIds) {
+    const displayName = companionNames.get(userId);
+    const pendingInvite = pendingInvites.find((invite) => invite.displayName === displayName);
+    expect(pendingInvite, `missing pending reservation for ${userId}`).toBeDefined();
+    const token = await reissueInviteToken(request, planId, String(pendingInvite?.id));
+    tokens.push(token);
+
+    await switchUser(request, userId);
+    const readiness = participantReadiness[userId];
+    expect(readiness, `missing readiness fixture for ${userId}`).toBeDefined();
+    const accepted = await request.put(`/api/v1/plans/${planId}/participation`, {
+      data: {
+        inviteToken: token,
+        coarseOriginLabel: readiness.area,
+        dietaryDeclared: true,
+        isReady: true,
+        availability: [{ startTime: readiness.startTime, endTime: readiness.endTime, source: "manual" }],
+      },
+    });
+    expect(accepted.status(), `invitation acceptance failed for ${userId}`).toBe(200);
+    await switchUser(request, "user_maya");
+  }
+
+  expect(new Set(tokens).size).toBe(tokens.length);
+  const after = await getPlan(request, planId);
+  expect(after.pendingInvites).toHaveLength(0);
+  expect(after.seatSummary).toMatchObject({
+    joined: 1 + companionIds.length,
+    pending: 0,
+    available: 2 - companionIds.length,
+  });
 }
 
 const participantReadiness: Record<string, { area: string; startTime: string; endTime: string }> = {
@@ -99,7 +203,7 @@ async function markAllParticipantsReady(request: APIRequestContext, planId: stri
 }
 
 test.describe("Hangtime API acceptance and privacy boundaries", () => {
-  test("creates at most three participants and exposes no precise location fields", async ({ context }) => {
+  test("keeps selected companions pending until accepted and exposes no precise location fields", async ({ context }) => {
     const tooMany = await context.request.post("/api/v1/plans", {
       data: {
         date: futureDate(),
@@ -112,8 +216,15 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
     expect(tooMany.status()).toBe(400);
 
     const planId = await createPlan(context.request, ["user_ethan", "user_clara"]);
+    const pendingPlan = await getPlan(context.request, planId);
+    expect(pendingPlan.participants).toHaveLength(1);
+    expect(pendingPlan.pendingInvites).toHaveLength(2);
+    expect(pendingPlan.seatSummary).toEqual({ joined: 1, pending: 2, available: 0 });
+
+    await acceptSelectedCompanions(context.request, planId, ["user_ethan", "user_clara"]);
     const plan = await getPlan(context.request, planId);
     expect(plan.participants).toHaveLength(3);
+    expect(plan.seatSummary).toEqual({ joined: 3, pending: 0, available: 0 });
     for (const participant of plan.participants) {
       expect(participant).not.toHaveProperty("postalCode");
       expect(participant).not.toHaveProperty("lat");
@@ -127,15 +238,34 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
 
   test("atomically consumes the final-seat invite under concurrent acceptance", async ({ context }) => {
     const planId = await createPlan(context.request);
+    await acceptSelectedCompanions(context.request, planId, ["user_ethan"]);
+
     const inviteResponse = await context.request.post(`/api/v1/plans/${planId}/invites`, {
       data: { email: "clara@dinnertime.sg" },
     });
-    expect(inviteResponse.status()).toBe(200);
-    const invite = (await inviteResponse.json()).data as { token: string };
+    expect(inviteResponse.status()).toBe(201);
+    const pendingInvite = (await inviteResponse.json()).data as {
+      inviteId: string;
+      expiresAt: string;
+      reservationState: string;
+      token?: unknown;
+      inviteUrl?: unknown;
+    };
+    expect(pendingInvite).toMatchObject({
+      inviteId: expect.any(String),
+      expiresAt: expect.any(String),
+      reservationState: "pending",
+    });
+    expect(pendingInvite).not.toHaveProperty("token");
+    expect(pendingInvite).not.toHaveProperty("inviteUrl");
+    const pendingPlan = await getPlan(context.request, planId);
+    expect(pendingPlan.seatSummary).toEqual({ joined: 2, pending: 1, available: 0 });
+    expect(pendingPlan.pendingInvites).toHaveLength(1);
+    const token = await reissueInviteToken(context.request, planId, pendingInvite.inviteId);
 
     await switchUser(context.request, "user_clara");
     const joinBody = {
-      inviteToken: invite.token,
+      inviteToken: token,
       coarseOriginLabel: "Tampines / Pasir Ris (East)",
       dietaryDeclared: true,
       isReady: true,
@@ -204,6 +334,7 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
 
   test("generates explainable recommendations without precise origins or unbounded links", async ({ context }) => {
     const planId = await createPlan(context.request);
+    await acceptSelectedCompanions(context.request, planId, ["user_ethan"]);
     await markAllParticipantsReady(context.request, planId);
     const recommendationResponse = await context.request.post(`/api/v1/plans/${planId}/recommendations`);
     expect(recommendationResponse.status()).toBe(200);
@@ -251,8 +382,22 @@ test.describe("Hangtime API acceptance and privacy boundaries", () => {
     expect(requestedUrls.every((url) => !/307683|609731|origin|postalCode/i.test(url))).toBe(true);
   });
 
+  test("does not call a style-only map ready while vector tiles are still pending", async ({ page }) => {
+    await page.route("https://tiles.openfreemap.org/planet/**", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+      await route.abort();
+    });
+
+    await page.goto("/plans/plan_friday_dinner");
+    await expect(page.getByText("Loading the open map…")).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText(/Map ready with/)).toBeHidden();
+    await expect(page.getByText(/Basic map fallback/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel("Venue shortlist and ballot controls")).toBeVisible();
+  });
+
   test("records organizer override reason and emits a private-location-free ICS download", async ({ context }) => {
     const planId = await createPlan(context.request);
+    await acceptSelectedCompanions(context.request, planId, ["user_ethan"]);
     await markAllParticipantsReady(context.request, planId);
     const generated = await context.request.post(`/api/v1/plans/${planId}/recommendations`);
     expect(generated.status()).toBe(200);

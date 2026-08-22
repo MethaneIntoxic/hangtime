@@ -2,10 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { initDatabase } from "@/lib/db/init";
 import {
   assertPlanAcceptingParticipants,
+  beginPlanWriteTransaction,
   confirmCurrentPlan,
   insertPlanInviteIfOpen,
   invalidatePlanDerivedStateInTransaction,
@@ -70,6 +71,36 @@ async function seedVotingPlan(db: Client): Promise<void> {
 }
 
 describe("atomic plan mutations", () => {
+  it("reconnects a local client after every busy attempt, including the terminal failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      const transaction = vi.fn().mockRejectedValue(busy);
+      const reconnect = vi.fn();
+      const client = { protocol: "file", transaction, reconnect } as unknown as Client;
+
+      const pending = beginPlanWriteTransaction(client);
+      const rejection = expect(pending).rejects.toMatchObject({ code: "SQLITE_BUSY" });
+      await vi.runAllTimersAsync();
+
+      await rejection;
+      expect(transaction).toHaveBeenCalledTimes(4);
+      expect(reconnect).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reconnect or retry a non-busy transaction failure", async () => {
+    const transaction = vi.fn().mockRejectedValue(new Error("transaction failed"));
+    const reconnect = vi.fn();
+    const client = { protocol: "file", transaction, reconnect } as unknown as Client;
+
+    await expect(beginPlanWriteTransaction(client)).rejects.toThrow("transaction failed");
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
   it("confirms only the current version shortlist and commits decision, state, and event together", async () => {
     const db = await temporaryDatabase();
     await seedVotingPlan(db);

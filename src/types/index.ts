@@ -16,6 +16,21 @@ export type ParticipantRole = "organizer" | "member";
 export type AcknowledgedState = "pending" | "acknowledged" | "conflict";
 export type DecisionKind = "winner" | "override";
 export type RecommendationStatus = "queued" | "processing" | "completed" | "failed";
+export type PlanInviteStatus = string;
+
+/** Safe organizer-facing projection for an outstanding invitation. */
+export interface PlanInviteSummary {
+  id: string;
+  displayName: string;
+  status: PlanInviteStatus;
+  expiresAt: string;
+}
+
+export interface PlanSeatSummary {
+  joined: number;
+  pending: number;
+  available: number;
+}
 
 export interface UserProfile {
   id: string;
@@ -108,6 +123,8 @@ export interface Plan {
   createdAt: string;
   updatedAt: string;
   participants?: PlanParticipant[];
+  pendingInvites?: PlanInviteSummary[];
+  seatSummary?: PlanSeatSummary;
   currentRun?: RecommendationRun;
   activeDecision?: PlanDecision;
 }

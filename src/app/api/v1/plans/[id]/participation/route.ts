@@ -5,19 +5,21 @@ import { generateId, hashToken } from "@/lib/auth/crypto";
 import { requirePlanMember } from "@/lib/auth/plan-access";
 import {
   extractInviteToken,
-  validatePlanInvite,
 } from "@/lib/auth/invites";
+import { hashIntendedEmail } from "@/lib/auth/request-security";
 import {
   participantLocationSubject,
   planningAreaLocation,
   privateLocationRepository,
-  savedProfileLocation,
+  profileLocationSubject,
 } from "@/lib/location/service";
 import { z } from "zod";
 import { hasValidAvailability } from "@/domain/plans/state-machine";
 import { sameAvailabilityWindows } from "@/lib/plan-inputs/canonical";
 import {
-  assertPlanAcceptingParticipants,
+  beginPlanWriteTransaction,
+  claimPendingPlanInvite,
+  countPlanSeats,
   invalidatePlanDerivedStateInTransaction,
   PlanMutationError,
 } from "@/lib/db/plan-mutations";
@@ -47,16 +49,6 @@ const participationSchema = z.object({
 }).strict();
 
 type ParticipantRow = typeof schema.planParticipants.$inferSelect;
-
-class JoinPlanError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status: number
-  ) {
-    super(message);
-  }
-}
 
 export async function PUT(
   req: Request,
@@ -103,96 +95,37 @@ export async function PUT(
       const tokenHash = hashToken(inviteToken);
       const partId = generateId("part");
       const originLabel = coarseOriginLabel || user.coarseArea;
-      const preciseLocation = originLabel
-        ? planningAreaLocation(originLabel) ?? await savedProfileLocation(user.id)
-        : null;
-      if (!originLabel || !preciseLocation) {
-        return apiError(
-          "LOCATION_REQUIRED",
-          "Choose a supported Singapore planning area before joining.",
-          400,
-        );
-      }
-      if (readyRequested && (!dietaryDeclared || !hasValidAvailability(availability, { startTime: "00:00", endTime: "23:59" }))) {
-        return apiError(
-          "READINESS_REQUIREMENTS_MISSING",
-          "Review dietary state and add a valid availability window before marking ready.",
-          400,
-        );
-      }
       try {
-        const tx = await client.transaction("write");
+        const tx = await beginPlanWriteTransaction(client);
         try {
-          await assertPlanAcceptingParticipants(tx, planId);
-          const inviteResult = await tx.execute({ sql: `
-            SELECT plan_id AS planId, email, expires_at AS expiresAt,
-                   accepted_at AS acceptedAt
-              FROM plan_invites
-             WHERE plan_id = ? AND token_hash = ?
-          `, args: [planId, tokenHash] });
-          const inviteRow = inviteResult.rows[0];
-          const invite = inviteRow ? {
-            planId: String(inviteRow.planId),
-            email: inviteRow.email === null ? null : String(inviteRow.email),
-            expiresAt: String(inviteRow.expiresAt),
-            acceptedAt: inviteRow.acceptedAt === null ? null : String(inviteRow.acceptedAt),
-          } : undefined;
-          const validation = validatePlanInvite(invite, {
+          await claimPendingPlanInvite(tx, {
             planId,
+            tokenHash,
+            userId: user.id,
             userEmail: user.email,
-            nowMs: Date.parse(now),
+            intendedEmailHash: hashIntendedEmail(user.email),
+            now,
           });
-          if (!validation.valid) {
-            throw new JoinPlanError(validation.code, validation.message, 403);
-          }
-
-          const existingResult = await tx.execute({ sql: `
-            SELECT id, plan_id AS planId, user_id AS userId, role,
-                   coarse_origin_label AS coarseOriginLabel,
-                   is_ready AS isReady,
-                   dietary_declared AS dietaryDeclared,
-                   acknowledged_state AS acknowledgedState,
-                   joined_at AS joinedAt
-              FROM plan_participants
-             WHERE plan_id = ? AND user_id = ?
-          `, args: [planId, user.id] });
-          const existingRow = existingResult.rows[0];
-          if (existingRow) {
-            participant = {
-              id: String(existingRow.id), planId: String(existingRow.planId),
-              userId: String(existingRow.userId), role: String(existingRow.role) as ParticipantRow["role"],
-              coarseOriginLabel: String(existingRow.coarseOriginLabel),
-              isReady: Number(existingRow.isReady),
-              dietaryDeclared: Number(existingRow.dietaryDeclared ?? 0),
-              acknowledgedState: String(existingRow.acknowledgedState) as ParticipantRow["acknowledgedState"],
-              joinedAt: String(existingRow.joinedAt),
-            };
-            await tx.commit();
-          } else {
-
-          const countResult = await tx.execute({
-            sql: "SELECT COUNT(*) AS participantCount FROM plan_participants WHERE plan_id = ?",
-            args: [planId],
-          });
-          if (Number(countResult.rows[0]?.participantCount ?? 0) >= 3) {
-            throw new JoinPlanError(
-              "GROUP_FULL",
-              "Maximum 3 diners reached for this plan.",
-              409
+          const preciseLocation = originLabel
+            ? planningAreaLocation(originLabel) ?? await privateLocationRepository(tx).get(profileLocationSubject(user.id))
+            : null;
+          if (!originLabel || !preciseLocation) {
+            throw new PlanMutationError(
+              "LOCATION_REQUIRED",
+              "Choose a supported Singapore planning area before joining.",
+              400,
             );
           }
-
-          const consumed = await tx.execute({ sql: `
-            UPDATE plan_invites SET accepted_at = ?
-             WHERE plan_id = ? AND token_hash = ?
-               AND accepted_at IS NULL AND expires_at > ?
-          `, args: [now, planId, tokenHash, now] });
-          if (consumed.rowsAffected !== 1) {
-            throw new JoinPlanError(
-              "INVITE_ALREADY_USED",
-              "This invitation is no longer valid.",
-              403
+          if (readyRequested && (!dietaryDeclared || !hasValidAvailability(availability, { startTime: "00:00", endTime: "23:59" }))) {
+            throw new PlanMutationError(
+              "READINESS_REQUIREMENTS_MISSING",
+              "Review dietary state and add a valid availability window before marking ready.",
+              400,
             );
+          }
+          const seats = await countPlanSeats(tx, planId, now);
+          if (seats.activeParticipants >= 3) {
+            throw new PlanMutationError("GROUP_FULL", "Maximum 3 diners reached for this plan.", 409);
           }
 
           const newParticipant: ParticipantRow = {
@@ -237,8 +170,19 @@ export async function PUT(
             }
           }
           participant = newParticipant;
+          await tx.execute({
+            sql: `INSERT INTO plan_events
+                    (id, plan_id, event_type, actor_id, payload_json, created_at)
+                  VALUES (?, ?, 'invitation_accepted', ?, ?, ?)`,
+            args: [
+              generateId("event"),
+              planId,
+              user.id,
+              JSON.stringify({ participantId: partId }),
+              now,
+            ],
+          });
           await tx.commit();
-          }
         } catch (error) {
           await tx.rollback();
           throw error;
@@ -246,7 +190,7 @@ export async function PUT(
           tx.close();
         }
       } catch (error) {
-        if (error instanceof JoinPlanError || error instanceof PlanMutationError) {
+        if (error instanceof PlanMutationError) {
           return apiError(error.code, error.message, error.status);
         }
         throw error;
@@ -263,7 +207,7 @@ export async function PUT(
         return apiError("INVALID_LOCATION", "Choose a supported Singapore planning area.", 400);
       }
 
-      const tx = await client.transaction("write");
+      const tx = await beginPlanWriteTransaction(client);
       try {
         const currentResult = await tx.execute({ sql: `
           SELECT pp.id, pp.plan_id AS planId, pp.user_id AS userId, pp.role,
@@ -363,7 +307,11 @@ export async function PUT(
         };
         await tx.commit();
       } catch (error) {
-        await tx.rollback();
+        try {
+          await tx.rollback();
+        } catch {
+          // Preserve the operation error; finally still closes the transaction.
+        }
         throw error;
       } finally {
         tx.close();

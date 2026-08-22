@@ -1,5 +1,10 @@
 import { createClient } from "@libsql/client";
 import { initDatabase } from "../src/lib/db/init";
+import {
+  PENDING_INVITE_COLUMNS,
+  PENDING_INVITE_INDEX_NAMES,
+  PENDING_SEAT_RESERVATIONS_MIGRATION,
+} from "../src/lib/db/migrations";
 import { getLocationKeyring } from "../src/lib/location/keyring";
 
 const url = process.env.TURSO_DATABASE_URL?.trim();
@@ -41,6 +46,29 @@ try {
   });
   if (integrityMigration.rows.length !== 1) {
     throw new Error("Remote migration is incomplete: readiness integrity migration was not recorded");
+  }
+  const reservationMigration = await client.execute({
+    sql: "SELECT 1 FROM schema_migrations WHERE version = ?",
+    args: [PENDING_SEAT_RESERVATIONS_MIGRATION],
+  });
+  if (reservationMigration.rows.length !== 1) {
+    throw new Error("Remote migration is incomplete: pending seat reservation migration was not recorded");
+  }
+  const inviteColumns = new Set((await client.execute(
+    "PRAGMA table_info(plan_invites)",
+  )).rows.map((row) => String(row.name)));
+  const missingInviteColumns = PENDING_INVITE_COLUMNS
+    .map((column) => column.name)
+    .filter((column) => !inviteColumns.has(column));
+  if (missingInviteColumns.length > 0) {
+    throw new Error(`Remote migration is incomplete: plan_invites columns missing: ${missingInviteColumns.join(", ")}`);
+  }
+  const inviteIndexes = new Set((await client.execute(
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'plan_invites'",
+  )).rows.map((row) => String(row.name)));
+  const missingInviteIndexes = PENDING_INVITE_INDEX_NAMES.filter((name) => !inviteIndexes.has(name));
+  if (missingInviteIndexes.length > 0) {
+    throw new Error(`Remote migration is incomplete: plan_invites indexes missing: ${missingInviteIndexes.join(", ")}`);
   }
   console.log(`TURSO_MIGRATION_PASS active_location_key=${keyring.activeVersion}`);
 } finally {

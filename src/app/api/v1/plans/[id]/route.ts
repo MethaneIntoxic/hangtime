@@ -6,10 +6,16 @@ import { tallyBallots, calculateMaxSelections } from "@/domain/voting/rules";
 import {
   requirePlanMember,
   requirePlanOrganizer,
+  stripParticipantProfileFields,
   stripPrivateLocationFields,
 } from "@/lib/auth/plan-access";
 import { client } from "@/lib/db";
-import { PlanMutationError, updatePlanInputsAtomically } from "@/lib/db/plan-mutations";
+import {
+  countPlanSeats,
+  listPlanInviteProjection,
+  PlanMutationError,
+  updatePlanInputsAtomically,
+} from "@/lib/db/plan-mutations";
 import { z } from "zod";
 
 const planUpdateSchema = z.object({
@@ -71,10 +77,10 @@ export async function GET(
       .where(eq(schema.availabilityWindows.participantId, part.id));
 
     const safeProfile = profile
-      ? stripPrivateLocationFields({
+      ? stripParticipantProfileFields({
           ...profile,
           notificationPrefs: JSON.parse(profile.notificationPrefs || "{}"),
-        })
+        }, user.id, part.userId)
       : undefined;
     participants.push({
       ...stripPrivateLocationFields(part),
@@ -88,6 +94,25 @@ export async function GET(
 
   const isParticipant = true;
   const isOrganizer = access.isOrganizer;
+  const inviteNow = new Date().toISOString();
+  const rawSeatSummary = isOrganizer ? await countPlanSeats(client, planId, inviteNow) : undefined;
+  const seatSummary = rawSeatSummary
+    ? {
+        joined: rawSeatSummary.activeParticipants,
+        pending: rawSeatSummary.liveReservations,
+        available: Math.max(0, 3 - rawSeatSummary.total),
+      }
+    : undefined;
+  const pendingInvites = isOrganizer
+    ? (await listPlanInviteProjection(client, planId, inviteNow))
+        .filter((invite) => invite.seatState === "pending")
+        .map((invite) => ({
+          id: invite.inviteId,
+          displayName: invite.displayLabel,
+          status: "pending" as const,
+          expiresAt: invite.expiresAt,
+        }))
+    : undefined;
 
   // Fetch latest recommendation run
   const latestRunCandidate = await db
@@ -193,6 +218,7 @@ export async function GET(
       ...userFeedback,
       reuseIntent: Boolean(userFeedback.reuseIntent),
     } : null,
+    ...(isOrganizer ? { pendingInvites, seatSummary } : {}),
   });
 }
 

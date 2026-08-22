@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client";
 import { calculateMaxSelections, tallyBallots, validateDecisionOverride } from "@/domain/voting/rules";
+import { validatePlanInvite } from "@/lib/auth/invites";
 import { generateId } from "@/lib/auth/crypto";
 
 export type SqlExecutor = Pick<Client, "execute">;
@@ -23,24 +24,88 @@ function isBusy(error: unknown): boolean {
   return candidate.code === "SQLITE_BUSY" || candidate.rawCode === 5 || /database is locked/i.test(error.message);
 }
 
-async function beginWriteTransaction(database: Client) {
+export async function beginPlanWriteTransaction(database: Client) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
       return await database.transaction("write");
     } catch (error) {
-      if (!isBusy(error) || attempt === 3) throw error;
+      if (!isBusy(error)) throw error;
       // The local @libsql sqlite3 adapter detaches the active transaction onto
       // its own connection. When a competing BEGIN IMMEDIATE is rejected as
       // SQLITE_BUSY, that failed BEGIN statement can remain attached to the
       // client's replacement connection. Reusing it makes a later COMMIT fail
       // with "SQL statements in progress". Reconnect only that idle, failed
-      // local connection before retrying; remote Turso clients manage their
-      // transaction streams and must not be reset here.
+      // local connection before retrying or surfacing the terminal error;
+      // remote Turso clients manage their transaction streams and must not be
+      // reset here.
       if (database.protocol === "file") database.reconnect();
+      if (attempt === 3) throw error;
       await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
     }
   }
   throw new Error("Unable to start a write transaction.");
+}
+
+type ReservationKind = "companion" | "guest" | "legacy";
+
+export interface PendingPlanInviteInput {
+  id: string;
+  planId: string;
+  organizerId: string;
+  reservationKind: Exclude<ReservationKind, "legacy">;
+  reservedUserId: string | null;
+  intendedEmailHash: string;
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export function isPlanJoinableState(state: unknown): boolean {
+  return JOINABLE_STATES.has(String(state));
+}
+
+export async function countPlanSeats(
+  tx: SqlExecutor,
+  planId: string,
+  now: string,
+): Promise<{ activeParticipants: number; liveReservations: number; total: number }> {
+  const active = await tx.execute({
+    sql: "SELECT COUNT(*) AS count FROM plan_participants WHERE plan_id = ?",
+    args: [planId],
+  });
+  const live = await tx.execute({
+    sql: `SELECT COUNT(*) AS count
+            FROM plan_invites i
+            JOIN plans p ON p.id = i.plan_id
+           WHERE i.plan_id = ?
+             AND p.state IN ('draft', 'collecting')
+             AND i.accepted_at IS NULL
+             AND i.revoked_at IS NULL
+             AND i.superseded_by_invite_id IS NULL
+             AND i.reservation_kind IN ('companion', 'guest')
+             AND i.intended_email_hash IS NOT NULL
+             AND i.expires_at > ?`,
+    args: [planId, now],
+  });
+  const activeParticipants = Number(active.rows[0]?.count ?? 0);
+  const liveReservations = Number(live.rows[0]?.count ?? 0);
+  return { activeParticipants, liveReservations, total: activeParticipants + liveReservations };
+}
+
+export async function assertPlanSeatCapacity(
+  tx: SqlExecutor,
+  planId: string,
+  requestedSeats: number,
+  now: string,
+): Promise<void> {
+  const seats = await countPlanSeats(tx, planId, now);
+  if (seats.total + requestedSeats > 3) {
+    throw new PlanMutationError(
+      "GROUP_FULL",
+      "This plan has no remaining seats.",
+      409,
+    );
+  }
 }
 
 async function deleteDerivedPlanState(tx: SqlExecutor, planId: string): Promise<void> {
@@ -119,7 +184,7 @@ export async function assertPlanAcceptingParticipants(
   planId: string,
 ): Promise<void> {
   const result = await tx.execute({ sql: "SELECT state FROM plans WHERE id = ?", args: [planId] });
-  if (!result.rows[0] || !JOINABLE_STATES.has(String(result.rows[0].state))) {
+  if (!result.rows[0] || !isPlanJoinableState(result.rows[0].state)) {
     throw new PlanMutationError(
       "INVALID_STATE",
       "Invitations can only be accepted while a plan is being collected.",
@@ -134,36 +199,354 @@ export async function insertPlanInviteIfOpen(
     id: string;
     planId: string;
     organizerId: string;
-    email: string | null;
+    email?: string | null;
+    reservationKind?: Exclude<ReservationKind, "legacy">;
+    reservedUserId?: string | null;
+    intendedEmailHash?: string | null;
     tokenHash: string;
     expiresAt: string;
     createdAt: string;
   },
 ): Promise<void> {
-  const result = await executor.execute({
-    sql: `INSERT INTO plan_invites
-            (id, plan_id, email, token_hash, expires_at, accepted_at, created_by, created_at)
-          SELECT ?, id, ?, ?, ?, NULL, ?, ?
-            FROM plans
-           WHERE id = ? AND organizer_id = ? AND state IN ('draft', 'collecting')`,
-    args: [
-      input.id,
-      input.email,
-      input.tokenHash,
-      input.expiresAt,
-      input.organizerId,
-      input.createdAt,
-      input.planId,
-      input.organizerId,
-    ],
+  const plan = await executor.execute({
+    sql: "SELECT organizer_id AS organizerId, state FROM plans WHERE id = ?",
+    args: [input.planId],
   });
-  if (result.rowsAffected !== 1) {
+  const planRow = plan.rows[0];
+  if (!planRow || String(planRow.organizerId) !== input.organizerId) {
+    throw new PlanMutationError("FORBIDDEN", "Only the organizer can reserve a plan seat.", 403);
+  }
+  if (!isPlanJoinableState(planRow.state)) {
     throw new PlanMutationError(
       "INVALID_STATE",
       "Invitations can only be created while a plan is being collected.",
       409,
     );
   }
+
+  const intendedEmailHash = input.intendedEmailHash ?? null;
+  const reservedUserId = input.reservedUserId ?? null;
+  const reservationKind = input.reservationKind ?? "guest";
+  if (!intendedEmailHash || !["companion", "guest"].includes(reservationKind)) {
+    throw new PlanMutationError(
+      "INVITE_EMAIL_REQUIRED",
+      "A new invitation must be bound to an intended email address.",
+      400,
+    );
+  }
+
+  const now = input.createdAt;
+  if (reservedUserId) {
+    const activeMember = await executor.execute({
+      sql: "SELECT 1 FROM plan_participants WHERE plan_id = ? AND user_id = ? LIMIT 1",
+      args: [input.planId, reservedUserId],
+    });
+    if (activeMember.rows.length > 0) {
+      throw new PlanMutationError("ALREADY_MEMBER", "This account is already in the plan.", 409);
+    }
+  }
+  const duplicate = await executor.execute({
+    sql: `SELECT 1
+            FROM plan_invites
+           WHERE plan_id = ?
+             AND accepted_at IS NULL
+             AND revoked_at IS NULL
+             AND superseded_by_invite_id IS NULL
+             AND expires_at > ?
+             AND (intended_email_hash = ? OR (reserved_user_id IS NOT NULL AND reserved_user_id = ?))
+           LIMIT 1`,
+    args: [input.planId, now, intendedEmailHash, reservedUserId],
+  });
+  if (duplicate.rows.length > 0) {
+    throw new PlanMutationError(
+      "INVITE_ALREADY_PENDING",
+      "This diner already has a pending invitation for the plan.",
+      409,
+    );
+  }
+
+  await assertPlanSeatCapacity(executor, input.planId, 1, now);
+  const result = await executor.execute({
+    sql: `INSERT INTO plan_invites
+            (id, plan_id, reservation_kind, reserved_user_id, email,
+             intended_email_hash, token_hash, expires_at, accepted_at,
+             revoked_at, accepted_user_id, superseded_by_invite_id,
+             created_by, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+    args: [
+      input.id,
+      input.planId,
+      reservationKind,
+      reservedUserId,
+      input.email ?? null,
+      intendedEmailHash,
+      input.tokenHash,
+      input.expiresAt,
+      input.organizerId,
+      input.createdAt,
+    ],
+  });
+  if (result.rowsAffected !== 1) {
+    throw new PlanMutationError("INVITE_CREATE_FAILED", "The invitation could not be created.", 409);
+  }
+}
+
+export interface ClaimedPlanInvite {
+  inviteId: string;
+  reservationKind: Exclude<ReservationKind, "legacy">;
+  reservedUserId: string | null;
+  intendedEmailHash: string;
+}
+
+/**
+ * Claims a live, bound reservation. The caller must perform participant,
+ * private-location, availability, and event writes on this same transaction
+ * before committing; a rollback restores the reservation for retry.
+ */
+export async function claimPendingPlanInvite(
+  tx: SqlExecutor,
+  input: {
+    planId: string;
+    tokenHash: string;
+    userId: string;
+    userEmail: string;
+    intendedEmailHash: string;
+    now: string;
+  },
+): Promise<ClaimedPlanInvite> {
+  const planResult = await tx.execute({
+    sql: "SELECT state FROM plans WHERE id = ?",
+    args: [input.planId],
+  });
+  if (!planResult.rows[0] || !isPlanJoinableState(planResult.rows[0].state)) {
+    throw new PlanMutationError("INVALID_STATE", "Invitations are closed for this plan.", 409);
+  }
+
+  const result = await tx.execute({
+    sql: `SELECT id AS inviteId,
+                 plan_id AS planId,
+                 reservation_kind AS reservationKind,
+                 reserved_user_id AS reservedUserId,
+                 intended_email_hash AS intendedEmailHash,
+                 expires_at AS expiresAt,
+                 accepted_at AS acceptedAt,
+                 revoked_at AS revokedAt,
+                 superseded_by_invite_id AS supersededByInviteId
+            FROM plan_invites
+           WHERE plan_id = ? AND token_hash = ?`,
+    args: [input.planId, input.tokenHash],
+  });
+  const row = result.rows[0];
+  if (!row) throw new PlanMutationError("INVITE_UNAVAILABLE", "This invitation is no longer available.", 403);
+
+  const validation = validatePlanInvite({
+    planId: String(row.planId),
+    intendedEmailHash: row.intendedEmailHash === null ? null : String(row.intendedEmailHash),
+    reservedUserId: row.reservedUserId === null ? null : String(row.reservedUserId),
+    expiresAt: String(row.expiresAt),
+    acceptedAt: row.acceptedAt === null ? null : String(row.acceptedAt),
+    revokedAt: row.revokedAt === null ? null : String(row.revokedAt),
+    supersededByInviteId: row.supersededByInviteId === null ? null : String(row.supersededByInviteId),
+  }, {
+    planId: input.planId,
+    userEmail: input.userEmail,
+    userId: input.userId,
+    intendedEmailHash: input.intendedEmailHash,
+    requireBound: true,
+    nowMs: Date.parse(input.now),
+  });
+  if (!validation.valid) {
+    throw new PlanMutationError("INVITE_UNAVAILABLE", "This invitation is no longer available.", 403);
+  }
+
+  const existing = await tx.execute({
+    sql: "SELECT 1 FROM plan_participants WHERE plan_id = ? AND user_id = ? LIMIT 1",
+    args: [input.planId, input.userId],
+  });
+  if (existing.rows.length > 0) {
+    throw new PlanMutationError("ALREADY_MEMBER", "This account is already in the plan.", 409);
+  }
+
+  const claimed = await tx.execute({
+    sql: `UPDATE plan_invites
+             SET accepted_at = ?, accepted_user_id = ?
+           WHERE plan_id = ? AND token_hash = ?
+             AND accepted_at IS NULL
+             AND revoked_at IS NULL
+             AND superseded_by_invite_id IS NULL
+             AND expires_at > ?`,
+    args: [input.now, input.userId, input.planId, input.tokenHash, input.now],
+  });
+  if (claimed.rowsAffected !== 1) {
+    throw new PlanMutationError("INVITE_UNAVAILABLE", "This invitation is no longer available.", 403);
+  }
+  return {
+    inviteId: String(row.inviteId),
+    reservationKind: String(row.reservationKind) as Exclude<ReservationKind, "legacy">,
+    reservedUserId: row.reservedUserId === null ? null : String(row.reservedUserId),
+    intendedEmailHash: String(row.intendedEmailHash),
+  };
+}
+
+export async function supersedePendingPlanInvite(
+  tx: SqlExecutor,
+  input: {
+    planId: string;
+    organizerId: string;
+    inviteId: string;
+    replacementInviteId: string;
+    now: string;
+  },
+): Promise<{
+  reservationKind: Exclude<ReservationKind, "legacy">;
+  reservedUserId: string | null;
+  intendedEmailHash: string;
+}> {
+  const current = await tx.execute({
+    sql: `SELECT reservation_kind AS reservationKind,
+                 reserved_user_id AS reservedUserId,
+                 intended_email_hash AS intendedEmailHash,
+                 accepted_at AS acceptedAt,
+                 revoked_at AS revokedAt,
+                 superseded_by_invite_id AS supersededByInviteId,
+                 expires_at AS expiresAt
+            FROM plan_invites
+           WHERE id = ? AND plan_id = ? AND created_by = ?`,
+    args: [input.inviteId, input.planId, input.organizerId],
+  });
+  const row = current.rows[0];
+  if (!row) throw new PlanMutationError("NOT_FOUND", "Invitation not found.", 404);
+  const expiresAtMs = Date.parse(String(row.expiresAt));
+  const nowMs = Date.parse(input.now);
+  if (
+    row.acceptedAt ||
+    row.revokedAt ||
+    row.supersededByInviteId ||
+    !row.intendedEmailHash ||
+    !Number.isFinite(expiresAtMs) ||
+    !Number.isFinite(nowMs) ||
+    expiresAtMs <= nowMs
+  ) {
+    throw new PlanMutationError("INVITE_TERMINAL", "Only a pending invitation can be reissued.", 409);
+  }
+  if (!["companion", "guest"].includes(String(row.reservationKind))) {
+    throw new PlanMutationError("INVITE_TERMINAL", "Only a pending invitation can be reissued.", 409);
+  }
+
+  const updated = await tx.execute({
+    sql: `UPDATE plan_invites
+             SET revoked_at = ?, superseded_by_invite_id = ?
+           WHERE id = ? AND plan_id = ? AND created_by = ?
+             AND accepted_at IS NULL AND revoked_at IS NULL
+             AND superseded_by_invite_id IS NULL
+             AND expires_at > ?`,
+    args: [input.now, input.replacementInviteId, input.inviteId, input.planId, input.organizerId, input.now],
+  });
+  if (updated.rowsAffected !== 1) {
+    throw new PlanMutationError("INVITE_TERMINAL", "Only a pending invitation can be reissued.", 409);
+  }
+  return {
+    reservationKind: String(row.reservationKind) as Exclude<ReservationKind, "legacy">,
+    reservedUserId: row.reservedUserId === null ? null : String(row.reservedUserId),
+    intendedEmailHash: String(row.intendedEmailHash),
+  };
+}
+
+export async function revokePendingPlanInvite(
+  tx: SqlExecutor,
+  input: { planId: string; organizerId: string; inviteId: string; now: string },
+): Promise<void> {
+  const current = await tx.execute({
+    sql: `SELECT accepted_at AS acceptedAt,
+                 revoked_at AS revokedAt,
+                 superseded_by_invite_id AS supersededByInviteId,
+                 expires_at AS expiresAt
+            FROM plan_invites
+           WHERE id = ? AND plan_id = ? AND created_by = ?`,
+    args: [input.inviteId, input.planId, input.organizerId],
+  });
+  const row = current.rows[0];
+  const expiresAtMs = Date.parse(String(row?.expiresAt ?? ""));
+  const nowMs = Date.parse(input.now);
+  if (
+    !row ||
+    row.acceptedAt ||
+    row.revokedAt ||
+    row.supersededByInviteId ||
+    !Number.isFinite(expiresAtMs) ||
+    !Number.isFinite(nowMs) ||
+    expiresAtMs <= nowMs
+  ) {
+    throw new PlanMutationError(
+      "INVITE_TERMINAL",
+      "Only a pending invitation can be revoked.",
+      409,
+    );
+  }
+
+  const result = await tx.execute({
+    sql: `UPDATE plan_invites
+             SET revoked_at = ?
+           WHERE id = ? AND plan_id = ? AND created_by = ?
+             AND accepted_at IS NULL AND revoked_at IS NULL
+             AND superseded_by_invite_id IS NULL
+             AND expires_at > ?`,
+    args: [input.now, input.inviteId, input.planId, input.organizerId, input.now],
+  });
+  if (result.rowsAffected === 1) return;
+  throw new PlanMutationError(
+    "INVITE_TERMINAL",
+    "Only a pending invitation can be revoked.",
+    409,
+  );
+}
+
+export async function listPlanInviteProjection(
+  executor: SqlExecutor,
+  planId: string,
+  now: string,
+): Promise<Array<{
+  inviteId: string;
+  displayLabel: string;
+  reservationKind: string;
+  seatState: "pending" | "accepted" | "revoked" | "superseded" | "expired";
+  expiresAt: string;
+  supersededByInviteId: string | null;
+}>> {
+  const result = await executor.execute({
+    sql: `SELECT i.id AS inviteId,
+                 i.reservation_kind AS reservationKind,
+                 i.expires_at AS expiresAt,
+                 i.accepted_at AS acceptedAt,
+                 i.revoked_at AS revokedAt,
+                 i.superseded_by_invite_id AS supersededByInviteId,
+                 p.display_name AS displayLabel
+            FROM plan_invites i
+            LEFT JOIN profiles p ON p.id = i.reserved_user_id
+           WHERE i.plan_id = ?
+           ORDER BY i.created_at, i.id`,
+    args: [planId],
+  });
+  return result.rows.map((row) => {
+    const expiresAt = String(row.expiresAt);
+    const seatState = row.acceptedAt
+      ? "accepted"
+      : row.supersededByInviteId
+        ? "superseded"
+        : row.revokedAt
+          ? "revoked"
+          : Date.parse(expiresAt) <= Date.parse(now)
+            ? "expired"
+            : "pending";
+    return {
+      inviteId: String(row.inviteId),
+      displayLabel: row.displayLabel === null ? "Invited diner" : String(row.displayLabel),
+      reservationKind: String(row.reservationKind),
+      seatState,
+      expiresAt,
+      supersededByInviteId: row.supersededByInviteId === null ? null : String(row.supersededByInviteId),
+    };
+  });
 }
 
 export type PlanInputChanges = Partial<{
@@ -196,7 +579,7 @@ export async function updatePlanInputsAtomically(
     reason: string;
   },
 ): Promise<Record<string, unknown>> {
-  const tx = await beginWriteTransaction(database);
+  const tx = await beginPlanWriteTransaction(database);
   try {
     const selected = await tx.execute({
       sql: "SELECT * FROM plans WHERE id = ? AND organizer_id = ?",
@@ -269,7 +652,7 @@ export async function saveCurrentBallot(
   database: Client,
   input: { planId: string; userId: string; candidateIds: string[]; now: string },
 ): Promise<{ ballotId: string; tally: ReturnType<typeof tallyBallots> }> {
-  const tx = await beginWriteTransaction(database);
+  const tx = await beginPlanWriteTransaction(database);
   try {
     const planResult = await tx.execute({
       sql: `SELECT p.state, p.version, p.organizer_id AS organizerId,
@@ -361,7 +744,7 @@ export async function confirmCurrentPlan(
     now: string;
   },
 ): Promise<{ decisionId: string; candidate: Record<string, unknown>; isOverride: boolean; overrideReason: string | null }> {
-  const tx = await beginWriteTransaction(database);
+  const tx = await beginPlanWriteTransaction(database);
   try {
     const planResult = await tx.execute({
       sql: "SELECT state, version, window_start AS windowStart, window_end AS windowEnd FROM plans WHERE id = ? AND organizer_id = ?",

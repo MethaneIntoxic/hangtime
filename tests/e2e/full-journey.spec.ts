@@ -68,7 +68,15 @@ test.describe("Hangtime Singapore — Full UAT & E2E Journey", () => {
     const mappableVenueCount = await page.getByLabel("Map venue choices").getByRole("button").count();
     expect(mappableVenueCount).toBeGreaterThanOrEqual(3);
     await expect(page.locator(".hangtime-map-marker")).toHaveCount(mappableVenueCount);
-    await expect(page.getByText("Loading the open map…")).toBeHidden({ timeout: 12_000 });
+    await expect(page.getByText("Loading the open map…")).toBeHidden({ timeout: 20_000 });
+    const liveMapReady = page.getByText(/Map ready with/);
+    const mapFallback = page.getByText(/Basic map fallback/);
+    await expect(liveMapReady.or(mapFallback)).toBeVisible({ timeout: 20_000 });
+    if (await mapFallback.isVisible()) {
+      await expect(liveMapReady).toBeHidden();
+    } else {
+      await expect(liveMapReady).toBeVisible();
+    }
     await expect(page.getByText("OpenFreeMap · © OpenStreetMap contributors")).toBeVisible();
     await expect(page.getByText("Travel, dietary and price details").first()).toBeVisible();
   });

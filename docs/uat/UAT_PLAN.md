@@ -58,6 +58,8 @@ The interface uses a **Singapore after-hours shared-pass** identity: warm paper,
 | FX-INVITE-VALID | unused | Email-bound, unexpired invite for Clara |
 | FX-INVITE-USED | consumed | Same plan shape, already accepted |
 | FX-INVITE-EXPIRED | expired | No accepted timestamp |
+| FX-INVITE-REVOKED | revoked | Email-bound reservation with a revocation timestamp |
+| FX-INVITE-PENDING-PAIR | pending | Two account-bound reservations on one organizer-only plan; no companion participant rows |
 | FX-OUTSIDER | unrelated | Valid production-equivalent session, no plan membership |
 | FX-MAP-OUTAGE | provider failure | Style/tile requests deterministically fail |
 | FX-NO-VENUES | recommendation failure | One named binding constraint produces zero candidates |
@@ -180,12 +182,16 @@ Priority is attached to the stable story ID so that a release report can disting
 
 **Acceptance**
 
-- **Given** an unexpired email-bound invite and matching signed-in email, **when** opened, **then** organizer, food/drink occasion, date, and window are visible without revealing existing private participant data.
-- **Given** the invite preview is valid, **when** the invite is accepted, **then** one participant record is created, the token is atomically consumed, and reuse fails.
-- **Given** an invite is missing, unknown, expired, wrong-email, cross-plan, reused, or would add a fourth person, **when** it is opened or submitted, **then** it fails without revealing whether a private plan exists.
+- **Given** one or two accepted saved companions are selected at plan creation, **when** the transaction commits, **then** each selection is a live account/email-bound seat reservation, only the organizer is an active participant, and accepted plus live reserved seats do not exceed three.
+- **Given** an unexpired account/email-bound invite and matching signed-in account, **when** opened, **then** organizer, food/drink occasion, date, and window are visible without revealing existing participant data.
+- **Given** the invite preview is valid, **when** the invite is accepted, **then** one participant record is created, the reservation is atomically consumed by that user, and reuse fails.
+- **Given** an organizer views the lobby, **when** reservations are pending, **then** `People & seats` distinguishes invited from joined people and permits explicit copy/reissue/revoke actions without claiming email delivery.
+- **Given** two distinct valid invitations contend for the last seat, **when** acceptance is concurrent, **then** exactly one reservation becomes one participant and the other fails deterministically without a fourth member or private plan data.
+- **Given** an invite is missing, unknown, expired, revoked, wrong-account/email, cross-plan, reused, superseded, closed, or would exceed capacity, **when** it is opened or submitted, **then** it fails with safe recovery copy and without revealing whether a private plan exists.
+- **Given** a manual share link is requested, **when** the response is inspected, **then** it is `no-store`, includes only one invite URL (no separate token field), and no token appears in events, participant projections, analytics, caches, or test artifacts.
 
-**Edge cases:** concurrent acceptance of the final seat; existing member opens invite; clipboard denied; email casing; link scanner opens URL before recipient.  
-**Coverage:** Automated for core lifecycle — `tests/e2e/adversarial-user-flows.spec.ts` and `tests/unit/auth-security.test.ts`; link-scanner behavior remains planned.
+**Edge cases:** revoke/accept and reissue/accept races; existing member opens invite; clipboard denied; email casing; sign-in return path; link scanner opens URL before recipient; expired reservations freeing capacity.
+**Coverage:** Partial — current tests cover the legacy core lifecycle and one same-token race; pending reservations, revocation/reissue, two-token contention, safe projections, and rendered recovery states are Iteration 3 targets. Link-scanner behavior remains planned.
 
 ### Feature HT-F3.2 — Participant check-in
 

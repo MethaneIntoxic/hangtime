@@ -11,7 +11,15 @@ import { ConfirmedView } from "@/components/confirmation/confirmed-view";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { ArrowLeft, RefreshCw, AlertCircle } from "lucide-react";
-import { Plan, UserProfile, PlanParticipant, RecommendationCandidate, PlanDecision } from "@/types";
+import {
+  Plan,
+  UserProfile,
+  PlanParticipant,
+  PlanInviteSummary,
+  PlanSeatSummary,
+  RecommendationCandidate,
+  PlanDecision,
+} from "@/types";
 
 export default function PlanRoomPage({
   params,
@@ -24,6 +32,8 @@ export default function PlanRoomPage({
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [participants, setParticipants] = useState<PlanParticipant[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<PlanInviteSummary[]>([]);
+  const [seatSummary, setSeatSummary] = useState<PlanSeatSummary | undefined>(undefined);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [candidates, setCandidates] = useState<RecommendationCandidate[]>([]);
   const [maxSelections, setMaxSelections] = useState(1);
@@ -51,6 +61,8 @@ export default function PlanRoomPage({
       if (planRes?.data?.plan) {
         setPlan(planRes.data.plan);
         setParticipants(planRes.data.participants || []);
+        setPendingInvites(planRes.data.pendingInvites || planRes.data.plan.pendingInvites || []);
+        setSeatSummary(planRes.data.seatSummary || planRes.data.plan.seatSummary);
         setIsOrganizer(Boolean(planRes.data.isOrganizer));
         setCandidates(planRes.data.currentRun?.candidates || []);
         setMaxSelections(planRes.data.maxSelections || 1);
@@ -84,6 +96,8 @@ export default function PlanRoomPage({
         if (planResponse?.data?.plan) {
           setPlan(planResponse.data.plan);
           setParticipants(planResponse.data.participants || []);
+          setPendingInvites(planResponse.data.pendingInvites || planResponse.data.plan.pendingInvites || []);
+          setSeatSummary(planResponse.data.seatSummary || planResponse.data.plan.seatSummary);
           setIsOrganizer(Boolean(planResponse.data.isOrganizer));
           setCandidates(planResponse.data.currentRun?.candidates || []);
           setMaxSelections(planResponse.data.maxSelections || 1);
@@ -234,10 +248,13 @@ export default function PlanRoomPage({
             plan={plan}
             currentUser={currentUser}
             participants={participants}
+            pendingInvites={pendingInvites}
+            seatSummary={seatSummary}
             isOrganizer={isOrganizer}
             onGenerateRecommendations={handleGenerateRecommendations}
             isGenerating={isGenerating}
             onReadinessSaved={loadPlanData}
+            onRefreshPlan={loadPlanData}
           />
         )}
       </main>

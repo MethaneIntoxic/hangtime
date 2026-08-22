@@ -5,6 +5,18 @@ async function switchUser(request: APIRequestContext, userId: string) {
   expect(response.status()).toBe(200);
 }
 
+async function currentCompanionDisplayName(request: APIRequestContext, companionId: string): Promise<string> {
+  const response = await request.get("/api/v1/companions");
+  expect(response.status()).toBe(200);
+  const companions = (await response.json()).data.companions as Array<{
+    companionId: string;
+    displayName: string;
+  }>;
+  const companion = companions.find((candidate) => candidate.companionId === companionId);
+  expect(companion, `missing current companion record for ${companionId}`).toBeDefined();
+  return companion!.displayName;
+}
+
 function futureDate(days = 7) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + days);
@@ -26,6 +38,12 @@ async function createCouplePlan(request: APIRequestContext) {
   });
   expect(response.status()).toBe(201);
   return (await response.json()).data.planId as string;
+}
+
+function tokenFromInviteUrl(inviteUrl: string) {
+  const token = new URL(inviteUrl).pathname.split("/").filter(Boolean).pop();
+  expect(token).toBeTruthy();
+  return decodeURIComponent(token as string);
 }
 
 test.describe("Adversarial user and recovery journeys", () => {
@@ -87,25 +105,72 @@ test.describe("Adversarial user and recovery journeys", () => {
 
   test("accepts an email-bound third-diner invitation once through the UI", async ({ page, context }) => {
     const planId = await createCouplePlan(context.request);
+    const createdPlanResponse = await context.request.get(`/api/v1/plans/${planId}`);
+    expect(createdPlanResponse.status()).toBe(200);
+    const createdPlan = (await createdPlanResponse.json()).data as {
+      participants: Array<{ userId: string }>;
+      pendingInvites: Array<{ displayName: string; status: string }>;
+    };
+    const ethanDisplayName = await currentCompanionDisplayName(context.request, "user_ethan");
+    expect(createdPlan.participants).toHaveLength(1);
+    expect(createdPlan.participants[0]?.userId).toBe("user_maya");
+    expect(createdPlan.pendingInvites).toEqual(expect.arrayContaining([
+      expect.objectContaining({ displayName: ethanDisplayName, status: "pending" }),
+    ]));
+
     const inviteResponse = await context.request.post(`/api/v1/plans/${planId}/invites`, {
       data: { email: "clara@dinnertime.sg" },
     });
-    expect(inviteResponse.status()).toBe(200);
-    const invite = (await inviteResponse.json()).data as { token: string };
+    expect(inviteResponse.status()).toBe(201);
+    const inviteData = (await inviteResponse.json()).data as { inviteId: string; token?: string };
+    expect(inviteData).not.toHaveProperty("token");
+
+    const planWithClaraInviteResponse = await context.request.get(`/api/v1/plans/${planId}`);
+    expect(planWithClaraInviteResponse.status()).toBe(200);
+    const planWithClaraInvite = (await planWithClaraInviteResponse.json()).data as {
+      pendingInvites: Array<{ id: string; displayName: string; status: string }>;
+    };
+    const claraDisplayName = await currentCompanionDisplayName(context.request, "user_clara");
+    const claraInvite = planWithClaraInvite.pendingInvites.find(
+      (pendingInvite) => pendingInvite.displayName === claraDisplayName && pendingInvite.status === "pending",
+    );
+    expect(claraInvite).toBeDefined();
+
+    const reissueResponse = await context.request.post(
+      `/api/v1/plans/${planId}/invites/${encodeURIComponent(claraInvite!.id)}/reissue`,
+    );
+    expect(reissueResponse.status()).toBe(200);
+    const reissuedInvite = (await reissueResponse.json()).data as { inviteUrl: string; token?: string };
+    expect(reissuedInvite).not.toHaveProperty("token");
+    const inviteToken = tokenFromInviteUrl(reissuedInvite.inviteUrl);
 
     await switchUser(context.request, "user_clara");
-    await page.goto(`/join/${invite.token}`);
+    const profileBeforeJoinResponse = await context.request.get("/api/v1/me");
+    expect(profileBeforeJoinResponse.status()).toBe(200);
+    const profileBeforeJoin = (await profileBeforeJoinResponse.json()).data.profile as {
+      displayName: string;
+      coarseArea: string;
+    };
+    await page.goto(`/join/${inviteToken}`);
     await expect(page.getByRole("heading", { name: "Join the hangout" })).toBeVisible();
-    await page.getByLabel("What should we call you?").fill("Clara UAT");
     await page.getByLabel("Where will you travel from?").selectOption({ label: "Tampines / Pasir Ris (East)" });
     await page.getByRole("button", { name: /Join plan/ }).click();
 
     await expect(page).toHaveURL(new RegExp(`/plans/${planId}$`));
     await expect(page.getByText("Lobby & Readiness")).toBeVisible();
 
-    const reusedInvite = await context.request.get(`/api/v1/invites/${invite.token}`);
+    const profileAfterJoinResponse = await context.request.get("/api/v1/me");
+    expect(profileAfterJoinResponse.status()).toBe(200);
+    const profileAfterJoin = (await profileAfterJoinResponse.json()).data.profile as {
+      displayName: string;
+      coarseArea: string;
+    };
+    expect(profileAfterJoin.displayName).toBe(profileBeforeJoin.displayName);
+    expect(profileAfterJoin.coarseArea).toBe(profileBeforeJoin.coarseArea);
+
+    const reusedInvite = await context.request.get(`/api/v1/invites/${inviteToken}`);
     expect(reusedInvite.status()).toBe(403);
-    expect((await reusedInvite.json()).error.code).toBe("INVITE_ALREADY_USED");
+    expect((await reusedInvite.json()).error.code).toBe("INVITE_UNAVAILABLE");
   });
 
   test("enforces the ballot contract and prevents outsider operations", async ({ context }) => {

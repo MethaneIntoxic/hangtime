@@ -1,15 +1,21 @@
 import { getCurrentUser } from "@/lib/auth/session";
 import { apiSuccess, apiError } from "@/lib/api-response";
-import { db, schema } from "@/lib/db";
+import { client, db, schema } from "@/lib/db";
 import { and, eq, desc } from "drizzle-orm";
-import { generateId } from "@/lib/auth/crypto";
-import { MealType, AlcoholMode, FairnessMode } from "@/types";
-import { stripPrivateLocationFields } from "@/lib/auth/plan-access";
+import { generateId, generateToken, hashToken } from "@/lib/auth/crypto";
+import { stripParticipantProfileFields, stripPrivateLocationFields } from "@/lib/auth/plan-access";
 import {
   planningAreaLocation,
-  saveParticipantLocation,
+  participantLocationSubject,
+  privateLocationRepository,
   savedProfileLocation,
 } from "@/lib/location/service";
+import { hashIntendedEmail } from "@/lib/auth/request-security";
+import {
+  beginPlanWriteTransaction,
+  insertPlanInviteIfOpen,
+  PlanMutationError,
+} from "@/lib/db/plan-mutations";
 import { z } from "zod";
 
 const createPlanSchema = z
@@ -73,11 +79,11 @@ export async function GET() {
       participantList.push({
         ...stripPrivateLocationFields(part),
         isReady: Boolean(part.isReady),
-        profile: u
-          ? stripPrivateLocationFields({
+          profile: u
+          ? stripParticipantProfileFields({
               ...u,
               notificationPrefs: JSON.parse(u.notificationPrefs || "{}"),
-            })
+            }, user.id, part.userId)
           : undefined,
       });
     }
@@ -185,81 +191,95 @@ export async function POST(req: Request) {
         .from(schema.profiles)
         .where(eq(schema.profiles.id, compId))
         .get();
-      if (compUser) companionProfiles.push(compUser);
+      if (!compUser || !compUser.email?.trim()) {
+        return apiError("INVALID_COMPANION", "Choose an accepted companion with a verified profile.", 403);
+      }
+      companionProfiles.push(compUser);
     }
 
-    // 1. Create plan record
-    await db.insert(schema.plans).values({
-      id: planId,
-      organizerId: user.id,
-      state: "collecting",
-      version: 1,
-      date,
-      windowStart,
-      windowEnd,
-      mealType: mealType as MealType,
-      groupBudgetCents: Number(groupBudgetCents),
-      alcoholMode: alcoholMode as AlcoholMode,
-      fairnessMode: fairnessMode as FairnessMode,
-      timezone: "Asia/Singapore",
-      shortlistSize: 5,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    // 2. Add organizer as an explicitly incomplete participant. A planning
-    // area alone is not a readiness declaration; availability and dietary
-    // state must be reviewed in the lobby first.
-    const organizerParticipantId = generateId("part");
-    await db.insert(schema.planParticipants).values({
-      id: organizerParticipantId,
-      planId,
-      userId: user.id,
-      role: "organizer",
-      coarseOriginLabel: user.coarseArea || "Central (Novena)",
-      isReady: 0,
-      dietaryDeclared: 0,
-      acknowledgedState: "pending",
-      joinedAt: now,
-    });
-    await saveParticipantLocation(
-      { participantId: organizerParticipantId, userId: user.id, planId },
-      organizerLocation,
-    );
-
-    // 3. Add invited companions
-    for (const compUser of companionProfiles) {
-        const participantId = generateId("part");
-        const companionLocation =
-          await savedProfileLocation(compUser.id) ?? planningAreaLocation(compUser.coarseArea);
-        await db.insert(schema.planParticipants).values({
-          id: participantId,
+    // The organizer is the only accepted participant at creation. Every
+    // selected companion consumes a bound, live seat reservation until it is
+    // accepted, revoked, superseded, or expired.
+    const tx = await beginPlanWriteTransaction(client);
+    try {
+      await tx.execute({
+        sql: `INSERT INTO plans
+                (id, organizer_id, state, version, date, window_start, window_end,
+                 meal_type, group_budget_cents, alcohol_mode, fairness_mode,
+                 timezone, shortlist_size, created_at, updated_at)
+              VALUES (?, ?, 'collecting', 1, ?, ?, ?, ?, ?, ?, ?, 'Asia/Singapore', 5, ?, ?)`,
+        args: [
           planId,
-          userId: compUser.id,
-          role: "member",
-          coarseOriginLabel: compUser.coarseArea || "Jurong East (West)",
-          isReady: 0,
-          dietaryDeclared: 0,
-          acknowledgedState: "pending",
-          joinedAt: now,
-        });
-        if (companionLocation) {
-          await saveParticipantLocation(
-            { participantId, userId: compUser.id, planId },
-            companionLocation,
-          );
-        }
-    }
+          user.id,
+          date,
+          windowStart,
+          windowEnd,
+          mealType,
+          Number(groupBudgetCents),
+          alcoholMode,
+          fairnessMode,
+          now,
+          now,
+        ],
+      });
 
-    // Log plan event
-    await db.insert(schema.planEvents).values({
-      id: generateId("event"),
-      planId,
-      eventType: "plan_created",
-      actorId: user.id,
-      payloadJson: JSON.stringify({ mealType, date, groupBudgetCents }),
-      createdAt: now,
-    });
+      const organizerParticipantId = generateId("part");
+      await tx.execute({
+        sql: `INSERT INTO plan_participants
+                (id, plan_id, user_id, role, coarse_origin_label,
+                 is_ready, dietary_declared, acknowledged_state, joined_at)
+              VALUES (?, ?, ?, 'organizer', ?, 0, 0, 'pending', ?)`,
+        args: [
+          organizerParticipantId,
+          planId,
+          user.id,
+          user.coarseArea || "Central (Novena)",
+          now,
+        ],
+      });
+      await privateLocationRepository(tx).put(
+        participantLocationSubject({ participantId: organizerParticipantId, userId: user.id, planId }),
+        organizerLocation,
+      );
+
+      for (const compUser of companionProfiles) {
+        const token = generateToken(24);
+        await insertPlanInviteIfOpen(tx, {
+          id: generateId("inv"),
+          planId,
+          organizerId: user.id,
+          email: null,
+          reservationKind: "companion",
+          reservedUserId: compUser.id,
+          intendedEmailHash: hashIntendedEmail(compUser.email),
+          tokenHash: hashToken(token),
+          expiresAt: new Date(Date.parse(now) + 72 * 60 * 60 * 1000).toISOString(),
+          createdAt: now,
+        });
+      }
+
+      await tx.execute({
+        sql: `INSERT INTO plan_events
+                (id, plan_id, event_type, actor_id, payload_json, created_at)
+              VALUES (?, ?, 'plan_created', ?, ?, ?)`,
+        args: [
+          generateId("event"),
+          planId,
+          user.id,
+          JSON.stringify({ mealType, date, groupBudgetCents }),
+          now,
+        ],
+      });
+      await tx.commit();
+    } catch (error) {
+      await tx.rollback();
+      if (error instanceof PlanMutationError) {
+        return apiError(error.code, error.message, error.status);
+      }
+      throw error;
+    } finally {
+      tx.close();
+    }
 
     return apiSuccess({ planId }, 201);
   } catch {

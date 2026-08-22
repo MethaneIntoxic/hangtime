@@ -5,6 +5,22 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * Keep invite target binding server-verifiable without storing the recipient's
+ * raw email in the reservation ledger. The production secret is required;
+ * callers may provide an explicit secret in isolated tests.
+ */
+export function hashIntendedEmail(
+  email: string,
+  secret = process.env.AUTH_SECRET,
+): string {
+  const normalized = normalizeEmail(email);
+  if (!normalized || !secret?.trim()) {
+    throw new Error("AUTH_SECRET is required for invite target binding.");
+  }
+  return crypto.createHmac("sha256", secret.trim()).update(normalized).digest("hex");
+}
+
 export function safeInternalReturnTo(value: unknown): string {
   if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) {
     return "/";

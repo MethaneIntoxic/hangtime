@@ -1,6 +1,7 @@
 import type { Client } from "@libsql/client";
 
 export const READINESS_INTEGRITY_MIGRATION = "0005_readiness_and_plan_integrity";
+export const PENDING_SEAT_RESERVATIONS_MIGRATION = "0006_pending_seat_reservations";
 
 type SqlExecutor = Pick<Client, "execute">;
 type TransactionalClient = Omit<Client, "transaction"> & { transaction?: Client["transaction"] };
@@ -27,6 +28,30 @@ const UNIQUE_IDENTITY_CHECKS = [
     columns: ["plan_id"],
   },
 ] as const;
+
+export const PENDING_INVITE_COLUMNS = [
+  { name: "reservation_kind", sql: "ALTER TABLE plan_invites ADD COLUMN reservation_kind TEXT" },
+  { name: "reserved_user_id", sql: "ALTER TABLE plan_invites ADD COLUMN reserved_user_id TEXT" },
+  { name: "intended_email_hash", sql: "ALTER TABLE plan_invites ADD COLUMN intended_email_hash TEXT" },
+  { name: "revoked_at", sql: "ALTER TABLE plan_invites ADD COLUMN revoked_at TEXT" },
+  { name: "accepted_user_id", sql: "ALTER TABLE plan_invites ADD COLUMN accepted_user_id TEXT" },
+  { name: "superseded_by_invite_id", sql: "ALTER TABLE plan_invites ADD COLUMN superseded_by_invite_id TEXT" },
+] as const;
+
+export const PENDING_INVITE_INDEX_NAMES = [
+  "plan_invites_plan_status_idx",
+  "plan_invites_plan_email_status_idx",
+  "plan_invites_plan_user_status_idx",
+] as const;
+
+const PENDING_INVITE_INDEXES = `
+  CREATE INDEX IF NOT EXISTS ${PENDING_INVITE_INDEX_NAMES[0]}
+    ON plan_invites(plan_id, accepted_at, revoked_at, expires_at);
+  CREATE INDEX IF NOT EXISTS ${PENDING_INVITE_INDEX_NAMES[1]}
+    ON plan_invites(plan_id, intended_email_hash, accepted_at, revoked_at);
+  CREATE INDEX IF NOT EXISTS ${PENDING_INVITE_INDEX_NAMES[2]}
+    ON plan_invites(plan_id, reserved_user_id, accepted_at, revoked_at);
+`;
 
 async function hasColumn(executor: SqlExecutor, table: string, column: string): Promise<boolean> {
   const columns = await executor.execute(`PRAGMA table_info(${table})`);
@@ -101,9 +126,22 @@ export async function applyIncrementalMigrations(client: Client): Promise<void> 
           ON plan_decisions(plan_id);
       `);
     }
+
+    for (const column of PENDING_INVITE_COLUMNS) {
+      if (!(await hasColumn(executor, "plan_invites", column.name))) {
+        await executor.execute(column.sql);
+      }
+    }
+    if (transaction) await transaction.executeMultiple(PENDING_INVITE_INDEXES);
+    else await client.executeMultiple(PENDING_INVITE_INDEXES);
+
     await executor.execute({
       sql: "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, datetime('now'))",
       args: [READINESS_INTEGRITY_MIGRATION],
+    });
+    await executor.execute({
+      sql: "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, datetime('now'))",
+      args: [PENDING_SEAT_RESERVATIONS_MIGRATION],
     });
     if (transaction) await transaction.commit();
     else await client.execute("COMMIT");

@@ -1,4 +1,4 @@
-import { blob, primaryKey, sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, primaryKey, sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const profiles = sqliteTable("profiles", {
   id: text("id").primaryKey(),
@@ -86,9 +86,19 @@ export const planInvites = sqliteTable("plan_invites", {
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: text("expires_at").notNull(),
   acceptedAt: text("accepted_at"),
+  reservationKind: text("reservation_kind"),
+  reservedUserId: text("reserved_user_id"),
+  intendedEmailHash: text("intended_email_hash"),
+  revokedAt: text("revoked_at"),
+  acceptedUserId: text("accepted_user_id"),
+  supersededByInviteId: text("superseded_by_invite_id"),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull(),
-});
+}, (table) => [
+  index("plan_invites_plan_status_idx").on(table.planId, table.acceptedAt, table.revokedAt, table.expiresAt),
+  index("plan_invites_plan_email_status_idx").on(table.planId, table.intendedEmailHash, table.acceptedAt, table.revokedAt),
+  index("plan_invites_plan_user_status_idx").on(table.planId, table.reservedUserId, table.acceptedAt, table.revokedAt),
+]);
 
 export const availabilityWindows = sqliteTable("availability_windows", {
   id: text("id").primaryKey(),

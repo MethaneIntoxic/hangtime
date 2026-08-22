@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { UserProfile, Plan, PlanParticipant } from "@/types";
+import { UserProfile, Plan, PlanParticipant, PlanInviteSummary, PlanSeatSummary } from "@/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,48 +14,136 @@ import {
   MapPin,
   Sparkles,
   Copy,
-  Check,
+  RefreshCw,
+  XCircle,
 } from "lucide-react";
 
 export interface PlanLobbyProps {
   plan: Plan;
   currentUser: UserProfile;
   participants: PlanParticipant[];
+  pendingInvites?: PlanInviteSummary[];
+  seatSummary?: PlanSeatSummary;
   isOrganizer: boolean;
   onGenerateRecommendations: () => void;
   isGenerating: boolean;
   onReadinessSaved?: () => void;
+  onRefreshPlan?: () => void | Promise<void>;
 }
 
 export function PlanLobby({
   plan,
   currentUser,
   participants,
+  pendingInvites = [],
+  seatSummary,
   isOrganizer,
   onGenerateRecommendations,
   isGenerating,
   onReadinessSaved,
+  onRefreshPlan,
 }: PlanLobbyProps) {
   const { toast } = useToast();
-  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [inviteNotice, setInviteNotice] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [inviteAction, setInviteAction] = useState<"idle" | "reissuing" | "revoking">("idle");
+  const [activeInviteId, setActiveInviteId] = useState<string | null>(null);
+  const [revokedInviteIds, setRevokedInviteIds] = useState<string[]>([]);
   const currentParticipant = participants.find((p) => p.userId === currentUser.id);
-  const allReady = participants.length >= 2 && participants.every((p) => p.isReady);
+  const visiblePendingInvites = (pendingInvites.length > 0 ? pendingInvites : plan.pendingInvites ?? []).filter(
+    (invite) => !revokedInviteIds.includes(invite.id)
+  );
+  const visibleSeatSummary = seatSummary ?? plan.seatSummary;
+  const joinedCount = visibleSeatSummary?.joined ?? participants.length;
+  const pendingCount = visibleSeatSummary?.pending ?? visiblePendingInvites.length;
+  const availableCount = visibleSeatSummary?.available ?? Math.max(0, 3 - joinedCount - pendingCount);
+  const allJoinedReady = joinedCount >= 2 && participants.filter((p) => p.isReady).length >= joinedCount;
 
-  const handleCopyInviteLink = async () => {
+  const inviteStatusLabel = (status: string) => {
+    switch (status) {
+      case "delivery_failed":
+        return "Invite delivery failed";
+      case "expired":
+        return "Invite expired";
+      case "revoked":
+        return "Invite revoked";
+      case "superseded":
+        return "Invite superseded";
+      case "seat_taken":
+        return "Seat claimed";
+      case "closed":
+        return "Plan closed";
+      default:
+        return "Invite pending";
+    }
+  };
+
+  const expiryLabel = (expiresAt: string) => {
+    const date = new Date(expiresAt);
+    return Number.isNaN(date.getTime()) ? "expiration not available" : `expires ${date.toLocaleDateString()}`;
+  };
+
+  const copyInviteUrl = async (url: string) => {
+    setInviteUrl(url);
     try {
-      const res = await fetch(`/api/v1/plans/${plan.id}/invites`, {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(url);
+      setInviteNotice("Invite link copied. Share it with your diner.");
+      setInviteError("");
+      toast("Invite link copied to clipboard.", "success");
+    } catch {
+      setInviteNotice("Invite link ready for manual copy.");
+      setInviteError("Clipboard access is unavailable. The same link is shown below so you can copy it manually.");
+      toast("Clipboard access is unavailable; the link is ready below.", "error");
+    }
+  };
+
+  const handleReissueInvite = async (inviteId: string) => {
+    setInviteAction("reissuing");
+    setActiveInviteId(inviteId);
+    setInviteNotice("");
+    setInviteError("");
+    try {
+      const response = await fetch(`/api/v1/plans/${plan.id}/invites/${encodeURIComponent(inviteId)}/reissue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      const data = await res.json();
-      if (data?.data?.inviteUrl) {
-        await navigator.clipboard.writeText(data.data.inviteUrl);
-        setCopiedInvite(true);
-        toast("Invite link copied to clipboard!", "success");
-        setTimeout(() => setCopiedInvite(false), 3000);
+      const payload = await response.json();
+      if (!response.ok || !payload?.data?.inviteUrl) {
+        throw new Error(payload?.error?.message || "This invite could not be reissued.");
       }
-    } catch {
-      toast("Could not create invite link", "error");
+      await copyInviteUrl(payload.data.inviteUrl);
+      setInviteNotice("Invite link reissued and ready to share.");
+      await onRefreshPlan?.();
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : "This invite could not be reissued.");
+      toast("This invite could not be reissued.", "error");
+    } finally {
+      setInviteAction("idle");
+      setActiveInviteId(null);
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    setInviteAction("revoking");
+    setActiveInviteId(inviteId);
+    setInviteNotice("");
+    setInviteError("");
+    try {
+      const response = await fetch(`/api/v1/plans/${plan.id}/invites/${encodeURIComponent(inviteId)}`, { method: "DELETE" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error?.message || "This invite could not be revoked.");
+      setRevokedInviteIds((previous) => (previous.includes(inviteId) ? previous : [...previous, inviteId]));
+      setInviteNotice("Invite revoked. No seat was added.");
+      toast("Invite revoked.", "success");
+      await onRefreshPlan?.();
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : "This invite could not be revoked.");
+      toast("This invite could not be revoked.", "error");
+    } finally {
+      setInviteAction("idle");
+      setActiveInviteId(null);
     }
   };
 
@@ -100,24 +188,16 @@ export function PlanLobby({
 
       {/* Participants Lobby */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users aria-hidden="true" className="h-4 w-4 text-terra-600" />
-            <h3 className="font-display text-sm font-bold text-ink-900">
-              People ({participants.length}/3)
-            </h3>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <Users aria-hidden="true" className="mt-0.5 h-4 w-4 text-terra-600" />
+            <div>
+              <h3 className="font-display text-sm font-bold text-ink-900">People &amp; seats</h3>
+              <p className="text-xs text-ink-600" aria-live="polite">
+                {joinedCount} joined · {pendingCount} pending · {availableCount} available
+              </p>
+            </div>
           </div>
-          {participants.length < 3 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCopyInviteLink}
-              className="text-xs"
-            >
-              {copiedInvite ? <Check className="h-3.5 w-3.5 text-sage-600" /> : <Copy className="h-3.5 w-3.5" />}
-              <span>{copiedInvite ? "Copied Link!" : "Invite 3rd Person"}</span>
-            </Button>
-          )}
         </div>
 
         <div className="grid gap-3">
@@ -193,7 +273,68 @@ export function PlanLobby({
               </Card>
             );
           })}
+
+          {visiblePendingInvites.map((invite) => (
+            <Card key={invite.id} variant="default" className="border border-amber-300 bg-amber-50/60" aria-label={`Pending invite for ${invite.displayName || "diner"}`}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-amber-300 bg-amber-100 text-amber-900">
+                    <Clock className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-ink-950 text-sm">{invite.displayName || "Invited diner"}</p>
+                    <p className="text-xs text-ink-600">{inviteStatusLabel(invite.status)} · {expiryLabel(invite.expiresAt)}</p>
+                  </div>
+                </div>
+                {isOrganizer && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleReissueInvite(invite.id)}
+                      isLoading={inviteAction === "reissuing" && activeInviteId === invite.id}
+                      aria-label={`Reissue invite for ${invite.displayName || "diner"}`}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" /> Reissue
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleRevokeInvite(invite.id)}
+                      isLoading={inviteAction === "revoking" && activeInviteId === invite.id}
+                      aria-label={`Revoke invite for ${invite.displayName || "diner"}`}
+                    >
+                      <XCircle className="h-3.5 w-3.5" /> Revoke
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))}
         </div>
+
+        {(inviteNotice || inviteError || inviteUrl) && (
+          <div className="space-y-2" aria-live="polite">
+            {inviteNotice && <p role="status" className="text-xs font-semibold text-sage-700">{inviteNotice}</p>}
+            {inviteError && <p role="alert" className="text-xs font-medium text-berry-700">{inviteError}</p>}
+            {inviteUrl && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <label htmlFor="invite-link" className="mb-1 block text-xs font-semibold text-ink-700">Invite link ready</label>
+                  <input id="invite-link" aria-label="Invite link" readOnly value={inviteUrl} className="min-h-11 w-full min-w-0 border border-ink-900/20 bg-cream-50 px-3 text-xs text-ink-800" />
+                </div>
+                <Button variant="outline" size="sm" onClick={() => copyInviteUrl(inviteUrl)}>
+                  <Copy className="h-3.5 w-3.5" /> Copy link
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+        {isOrganizer && availableCount > 0 && (
+          <p className="text-xs leading-5 text-ink-600">
+            {availableCount === 1 ? "One seat is open." : `${availableCount} seats are open.`} Start a new plan or add a verified companion to reserve another seat.
+          </p>
+        )}
       </div>
 
       {/* Deliberate readiness controls for the active participant */}
@@ -212,15 +353,16 @@ export function PlanLobby({
               variant="primary"
               size="lg"
               onClick={onGenerateRecommendations}
+              disabled={!allJoinedReady}
               isLoading={isGenerating}
               className="w-full text-base font-bold shadow-lift"
             >
               <Sparkles className="h-5 w-5" />
               <span>Find Singapore Dining Shortlist</span>
             </Button>
-            {!allReady && (
+            {!allJoinedReady && (
               <p className="text-center text-xs text-amber-900 font-medium">
-                💡 Note: You can generate recommendations now or wait for all companions to mark ready.
+                {joinedCount < 2 ? "Waiting for at least 2 diners to join." : "Waiting for every joined diner to finish check-in."}
               </p>
             )}
           </div>
