@@ -28,8 +28,13 @@ const privateDocumentHeaders = [
   { key: "Cache-Control", value: "private, no-store, max-age=0" },
 ];
 
+// Vercel's Next.js integration manages its own traced server output. The
+// standalone bundle is still required by the local production E2E harness and
+// self-hosted deployments, so only omit it for builds running on Vercel.
+const isVercelBuild = process.env.VERCEL === "1";
+
 const nextConfig: NextConfig = {
-  output: "standalone",
+  ...(isVercelBuild ? {} : { output: "standalone" }),
   outputFileTracingExcludes: {
     "*": ["./data/**/*", "./**/*.db", "./**/*.db-wal", "./**/*.db-shm"],
   },
