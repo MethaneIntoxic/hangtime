@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en-SG">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#e4572e" />
+    <meta name="robots" content="noindex" />
+    <title>Offline · Hangtime</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        background: #fdfaf6;
+        color: #221b14;
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: radial-gradient(circle at top, #fbe0d5, #fdfaf6 48%);
+      }
+      main {
+        width: min(100%, 420px);
+        padding: 32px 24px;
+        border: 1px solid #ead9c2;
+        border-radius: 28px;
+        background: rgba(253, 250, 246, 0.96);
+        box-shadow: 0 18px 48px rgba(34, 27, 20, 0.12);
+        text-align: center;
+      }
+      img { width: 88px; height: 88px; border-radius: 22px; }
+      h1 { margin: 20px 0 8px; font-size: 1.75rem; }
+      p { margin: 0; color: #5c5043; line-height: 1.55; }
+      button {
+        margin-top: 24px;
+        min-height: 44px;
+        padding: 0 20px;
+        border: 0;
+        border-radius: 14px;
+        background: #e4572e;
+        color: white;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button:focus-visible { outline: 3px solid #e9764f; outline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/icon-192.png" alt="" width="88" height="88" />
+      <h1>Hangtime is offline</h1>
+      <p>
+        Your private plans and invitations are never cached. Reconnect to view or
+        change them safely.
+      </p>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

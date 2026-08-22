@@ -1,0 +1,250 @@
+@import "tailwindcss";
+
+.hangtime-map-marker {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 2px solid #fffaf1;
+  border-radius: 50% 50% 50% 0;
+  background: #d8462f;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgb(34 27 20 / 28%);
+  cursor: pointer;
+}
+
+.hangtime-map-marker:hover,
+.hangtime-map-marker:focus-visible {
+  outline: 3px solid #f0b84e;
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Hangtime design system — warm, playful, socially neutral.
+   --------------------------------------------------------------------------- */
+
+@theme {
+  /* Brand palette */
+  --color-cream-50: #f6f0e5;
+  --color-cream-100: #eee5d6;
+  --color-cream-200: #ddd1bf;
+  --color-cream-300: #c8b9a3;
+
+  --color-terra-50: #fdf1ec;
+  --color-terra-100: #fbe0d5;
+  --color-terra-200: #f7c2ae;
+  --color-terra-300: #f09d7f;
+  --color-terra-400: #e9764f;
+  --color-terra-500: #e3472d;
+  --color-terra-600: #c93622;
+  --color-terra-700: #a6361b;
+  --color-terra-800: #852e1c;
+  --color-terra-900: #6d291b;
+
+  --color-amber-glow: #f5b23d;
+  --color-amber-100: #fdefd2;
+  --color-amber-300: #f7d98d;
+  --color-amber-500: #f0b84e;
+
+  --color-sage-50: #f1f7f1;
+  --color-sage-100: #dcecdd;
+  --color-sage-500: #5f8f32;
+  --color-sage-600: #4a7525;
+  --color-sage-700: #37591b;
+
+  --color-plum-50: #f6f2f7;
+  --color-plum-500: #7a5c85;
+  --color-plum-700: #563c60;
+
+  --color-berry-100: #fbe3e0;
+  --color-berry-500: #d1453a;
+  --color-berry-600: #b53a30;
+  --color-berry-700: #933027;
+
+  --color-ink-950: #11110f;
+  --color-ink-900: #191916;
+  --color-ink-800: #332a21;
+  --color-ink-700: #463b30;
+  --color-ink-600: #5c5043;
+  --color-ink-500: #77685a;
+  --color-ink-400: #948575;
+  --color-ink-300: #b3a698;
+
+  /* Typography */
+  --font-sans: "Bahnschrift", "Aptos Narrow", "Segoe UI Variable", "Segoe UI", ui-sans-serif, -apple-system,
+    BlinkMacSystemFont, "SF Pro Display", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
+
+  /* Elevation */
+  --shadow-soft: 0 1px 2px rgb(34 27 20 / 0.05), 0 4px 16px rgb(34 27 20 / 0.06);
+  --shadow-lift: 0 2px 4px rgb(34 27 20 / 0.06), 0 12px 32px rgb(34 27 20 / 0.12);
+  --shadow-pop: 0 4px 8px rgb(34 27 20 / 0.08), 0 24px 56px rgb(34 27 20 / 0.2);
+  --shadow-focus: 0 0 0 3px rgb(228 87 46 / 0.35);
+
+  /* Motion */
+  --animate-fade-up: fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fade-in 0.25s ease-out both;
+  --animate-pop-in: pop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-pulse-soft: pulse-soft 2.2s ease-in-out infinite;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
+
+@layer base {
+  * {
+    border-color: var(--color-cream-200);
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-cream-50 text-ink-900 font-sans antialiased;
+    text-rendering: optimizeLegibility;
+    background-image: linear-gradient(90deg, transparent 0 95%, rgb(17 17 15 / 0.025) 95% 100%);
+    background-size: 11px 100%;
+  }
+
+  ::selection {
+    background: var(--color-terra-200);
+    color: var(--color-ink-900);
+  }
+
+  /* Accessible, always-visible focus rings */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 3px solid var(--color-terra-400);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .section-kicker {
+    width: fit-content;
+    border-bottom: 1px solid var(--color-terra-500);
+    padding-bottom: 0.65rem;
+    color: var(--color-terra-700);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+  }
+
+  .editorial-hero {
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(90deg, transparent 0 4%, rgb(96 118 75 / 0.08) 4% 4.08%, transparent 4.08%),
+      var(--color-cream-50);
+  }
+
+  .editorial-hero::before {
+    content: "";
+    position: absolute;
+    left: -4rem;
+    top: 6rem;
+    width: 12rem;
+    height: 20rem;
+    border: 1px solid rgb(96 118 75 / 0.22);
+    border-radius: 50%;
+    transform: rotate(-18deg);
+  }
+
+  .meal-ticket {
+    clip-path: polygon(2% 0, 98% 0, 100% 5%, 100% 95%, 98% 100%, 2% 100%, 0 95%, 0 5%);
+  }
+
+  .brand-rule {
+    border-top: 1px solid rgb(17 17 15 / 0.26);
+    border-bottom: 1px solid rgb(17 17 15 / 0.26);
+  }
+
+  .route-code {
+    color: var(--color-sage-700);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .paper-panel {
+    border: 1px solid rgb(17 17 15 / 0.24);
+    background: rgb(246 240 229 / 0.94);
+    box-shadow: 7px 7px 0 rgb(17 17 15 / 0.08);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}

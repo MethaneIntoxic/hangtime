@@ -1,0 +1,9 @@
+# MethaneIntoxic owns the initial release surface. Replace with a team when the
+# project has multiple maintainers.
+* @MethaneIntoxic
+
+/.github/ @MethaneIntoxic
+/src/app/api/ @MethaneIntoxic
+/src/lib/auth/ @MethaneIntoxic
+/src/lib/db/ @MethaneIntoxic
+/public/sw.js @MethaneIntoxic

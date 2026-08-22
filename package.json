@@ -1,0 +1,75 @@
+{
+  "name": "hangtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hangtime — couples-first social planning PWA for Singapore (MVP)",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ]
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ci": "node scripts/run-hermetic-e2e.mjs",
+    "prepare:standalone": "node scripts/prepare-standalone.mjs",
+    "test:e2e:production": "pnpm prepare:standalone && playwright test --config=playwright.production.config.ts",
+    "test:e2e:ui": "playwright test --ui",
+    "check:pwa": "node scripts/check-pwa.mjs",
+    "check:maps": "node scripts/check-maps.mjs",
+    "check:map-provider": "node scripts/check-map-provider.mjs",
+    "check:production-env": "node scripts/validate-production-env.mjs",
+    "preflight:remote": "node scripts/preflight-remote.mjs",
+    "verify:location-encryption": "tsx scripts/verify-location-encryption.ts",
+    "migrate:location-encryption": "tsx scripts/migrate-location-encryption.ts",
+    "rotate:location-key": "tsx scripts/rotate-location-key.ts",
+    "smoke": "node scripts/smoke.mjs",
+    "ci:local": "node scripts/ci.mjs",
+    "db:migrate:turso": "tsx scripts/migrate-turso.ts",
+    "db:seed": "tsx src/lib/db/seed.ts",
+    "db:reset": "tsx src/lib/db/reset.ts",
+    "verify": "pnpm ci:local"
+  },
+  "dependencies": {
+    "@libsql/client": "0.17.4",
+    "clsx": "2.1.1",
+    "drizzle-orm": "0.45.2",
+    "lucide-react": "0.525.0",
+    "maplibre-gl": "6.4.1",
+    "motion": "12.23.6",
+    "next": "16.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwind-merge": "3.3.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.3",
+    "better-sqlite3": "13.0.3",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.3.1",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

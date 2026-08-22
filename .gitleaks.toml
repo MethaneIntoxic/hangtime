@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated, dependency, runtime, and local-tool artifacts are not source"
+paths = [
+  '''(^|/|\\)\.git($|/|\\)''',
+  '''(^|/|\\)\.next($|/|\\)''',
+  '''(^|/|\\)\.reasonix($|/|\\)''',
+  '''(^|/|\\)node_modules($|/|\\)''',
+  '''(^|/|\\)test-results($|/|\\)''',
+  '''(^|/|\\)playwright-report($|/|\\)''',
+  '''(^|/|\\)data($|/|\\)''',
+]
