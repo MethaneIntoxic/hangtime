@@ -1,9 +1,16 @@
 import type { Client, Transaction } from "@libsql/client";
 import { client } from "@/lib/db";
 import { generateId, generateToken, hashToken } from "./crypto";
-import { normalizeEmail } from "./request-security";
+import { hashIntendedEmail, normalizeEmail } from "./request-security";
+import {
+  claimInviteContinuation,
+  getInviteContinuationDisposition,
+  validateInviteContinuation,
+  type InviteContinuationDisposition,
+} from "./invite-continuation";
 import {
   createProductionSession,
+  revokeProductionSession,
   type NewProductionSession,
 } from "./production-session";
 
@@ -14,6 +21,16 @@ export interface IssuedMagicLink {
   email: string;
   token: string;
   expiresAt: string;
+  continuationId: string | null;
+  continuationDisposition: InviteContinuationDisposition;
+}
+
+export interface IssueMagicLinkOptions {
+  continuationHandle?: string | null;
+}
+
+export interface ConsumeMagicLinkOptions {
+  previousSessionToken?: string | null;
 }
 
 export type ConsumeMagicLinkResult =
@@ -26,8 +43,18 @@ export async function issueMagicLink(
   email: string,
   database: Executor = client,
   nowMs = Date.now(),
+  options: IssueMagicLinkOptions = {},
 ): Promise<IssuedMagicLink> {
   const normalized = normalizeEmail(email);
+  const continuationDisposition = await getInviteContinuationDisposition(
+    options.continuationHandle,
+    normalized,
+    database,
+    nowMs,
+  );
+  const validatedContinuation = options.continuationHandle
+    ? await validateInviteContinuation(options.continuationHandle, normalized, database, nowMs)
+    : null;
   const token = generateToken(32);
   const id = generateId("authlink");
   const now = new Date(nowMs).toISOString();
@@ -37,11 +64,32 @@ export async function issueMagicLink(
     sql:
       `INSERT INTO auth_magic_links
        (id, email_normalized, token_hash, expires_at, consumed_at,
-        delivery_status, provider_message_id, created_at)
-       VALUES (?, ?, ?, ?, NULL, 'pending', NULL, ?)`,
-    args: [id, normalized, hashToken(token), expiresAt, now],
+        delivery_status, provider_message_id, continuation_id, created_at)
+       VALUES (?, ?, ?, ?, NULL, 'pending', NULL, ?, ?)`,
+    args: [id, normalized, hashToken(token), expiresAt, validatedContinuation?.id ?? null, now],
   });
-  return { id, email: normalized, token, expiresAt };
+  let continuationId = validatedContinuation?.id ?? null;
+  let finalDisposition = continuationDisposition;
+  if (continuationId) {
+    const extended = await database.execute({
+      sql: `UPDATE auth_invite_continuations
+               SET expires_at = CASE WHEN expires_at < ? THEN ? ELSE expires_at END
+             WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?
+           RETURNING id`,
+      args: [expiresAt, expiresAt, continuationId, new Date(nowMs).toISOString()],
+    });
+    if (extended.rows.length !== 1) {
+      // Do not leave a magic-link row pointing at a continuation that failed
+      // the live binding/extension check.
+      await database.execute({
+        sql: "UPDATE auth_magic_links SET continuation_id = NULL WHERE id = ?",
+        args: [id],
+      });
+      continuationId = null;
+      finalDisposition = "unavailable";
+    }
+  }
+  return { id, email: normalized, token, expiresAt, continuationId, continuationDisposition: finalDisposition };
 }
 
 export async function updateMagicLinkDelivery(
@@ -70,6 +118,7 @@ async function consumeMagicLinkOnce(
   token: string,
   database: Client = client,
   nowMs = Date.now(),
+  options: ConsumeMagicLinkOptions = {},
 ): Promise<ConsumeMagicLinkResult> {
   if (!token || token.length > 256) {
     return { ok: false, code: "INVALID_OR_EXPIRED_LINK" };
@@ -82,7 +131,7 @@ async function consumeMagicLinkOnce(
     const result = await transaction.execute({
       sql:
         `SELECT email_normalized AS email, expires_at AS expiresAt,
-                consumed_at AS consumedAt
+                consumed_at AS consumedAt, continuation_id AS continuationId
          FROM auth_magic_links WHERE token_hash = ?`,
       args: [tokenHash],
     });
@@ -92,6 +141,7 @@ async function consumeMagicLinkOnce(
           email: String(row.email),
           expiresAt: String(row.expiresAt),
           consumedAt: row.consumedAt === null ? null : String(row.consumedAt),
+          continuationId: typeof row.continuationId === "string" ? row.continuationId : null,
         }
       : undefined;
 
@@ -140,7 +190,51 @@ async function consumeMagicLinkOnce(
       });
     }
 
-    const session = await createProductionSession(profile.id, transaction, nowMs);
+    let pendingInviteId: string | null = null;
+    if (link.continuationId) {
+      const continuationResult = await transaction.execute({
+        sql: `SELECT c.id, c.invite_id AS inviteId, c.intended_email_hash AS intendedEmailHash,
+                     c.expires_at AS continuationExpiresAt, c.consumed_at AS continuationConsumedAt,
+                     c.revoked_at AS continuationRevokedAt,
+                     i.expires_at AS inviteExpiresAt, i.accepted_at AS acceptedAt,
+                     i.revoked_at AS inviteRevokedAt, i.superseded_by_invite_id AS supersededByInviteId,
+                     i.reserved_user_id AS reservedUserId,
+                     i.intended_email_hash AS inviteEmailHash,
+                     p.state AS planState
+                FROM auth_invite_continuations c
+                JOIN plan_invites i ON i.id = c.invite_id
+                JOIN plans p ON p.id = i.plan_id
+               WHERE c.id = ?`,
+        args: [link.continuationId],
+      });
+      const continuationRow = continuationResult.rows[0];
+      const expectedEmailHash = hashIntendedEmail(link.email);
+      const live = continuationRow &&
+        typeof continuationRow.intendedEmailHash === "string" &&
+        continuationRow.intendedEmailHash === expectedEmailHash &&
+        continuationRow.inviteEmailHash === expectedEmailHash &&
+        continuationRow.continuationConsumedAt === null &&
+        continuationRow.continuationRevokedAt === null &&
+        typeof continuationRow.continuationExpiresAt === "string" && continuationRow.continuationExpiresAt > now &&
+        continuationRow.acceptedAt === null && continuationRow.inviteRevokedAt === null &&
+        continuationRow.supersededByInviteId === null &&
+        (continuationRow.planState === "draft" || continuationRow.planState === "collecting") &&
+        typeof continuationRow.inviteExpiresAt === "string" && continuationRow.inviteExpiresAt > now &&
+        (continuationRow.reservedUserId === null || continuationRow.reservedUserId === profile.id);
+      if (live) {
+        pendingInviteId = await claimInviteContinuation(
+          link.continuationId,
+          expectedEmailHash,
+          transaction,
+          nowMs,
+        );
+      }
+    }
+
+    if (options.previousSessionToken) {
+      await revokeProductionSession(options.previousSessionToken, transaction, nowMs);
+    }
+    const session = await createProductionSession(profile.id, transaction, nowMs, { pendingInviteId });
     await transaction.commit();
     return { ok: true, userId: profile.id, session };
   } finally {
@@ -158,10 +252,11 @@ export async function consumeMagicLink(
   token: string,
   database: Client = client,
   nowMs = Date.now(),
+  options: ConsumeMagicLinkOptions = {},
 ): Promise<ConsumeMagicLinkResult> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await consumeMagicLinkOnce(token, database, nowMs);
+      return await consumeMagicLinkOnce(token, database, nowMs, options);
     } catch (error) {
       if (!isTransientWriteLock(error) || attempt === 2) throw error;
       await new Promise((resolve) => setTimeout(resolve, 15 * (attempt + 1)));
@@ -180,5 +275,6 @@ export async function deleteExpiredAuthRecords(
     { sql: `DELETE FROM auth_magic_links WHERE expires_at < ?`, args: [now] },
     { sql: `DELETE FROM auth_sessions WHERE expires_at < ? OR revoked_at IS NOT NULL`, args: [now] },
     { sql: `DELETE FROM auth_rate_limits WHERE bucket_start < ?`, args: [rateLimitCutoff] },
+    { sql: `DELETE FROM auth_invite_continuations WHERE expires_at < ?`, args: [now] },
   ], "write");
 }

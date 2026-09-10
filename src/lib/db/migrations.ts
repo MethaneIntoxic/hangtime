@@ -2,6 +2,12 @@ import type { Client } from "@libsql/client";
 
 export const READINESS_INTEGRITY_MIGRATION = "0005_readiness_and_plan_integrity";
 export const PENDING_SEAT_RESERVATIONS_MIGRATION = "0006_pending_seat_reservations";
+export const AUTH_INVITE_CONTINUATIONS_MIGRATION = "0007_auth_invite_continuations";
+
+export const AUTH_INVITE_CONTINUATION_INDEX_NAMES = [
+  "auth_invite_continuations_invite_status_idx",
+  "auth_invite_continuations_expiry_idx",
+] as const;
 
 type SqlExecutor = Pick<Client, "execute">;
 type TransactionalClient = Omit<Client, "transaction"> & { transaction?: Client["transaction"] };
@@ -135,6 +141,78 @@ export async function applyIncrementalMigrations(client: Client): Promise<void> 
     if (transaction) await transaction.executeMultiple(PENDING_INVITE_INDEXES);
     else await client.executeMultiple(PENDING_INVITE_INDEXES);
 
+    if (transaction) {
+      await transaction.executeMultiple(`
+        CREATE TABLE IF NOT EXISTS auth_magic_links (
+          id TEXT PRIMARY KEY,
+          email_normalized TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          consumed_at TEXT,
+          delivery_status TEXT NOT NULL DEFAULT 'pending',
+          provider_message_id TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          revoked_at TEXT,
+          created_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS auth_magic_links_email_created_idx
+          ON auth_magic_links(email_normalized, created_at);
+        CREATE INDEX IF NOT EXISTS auth_magic_links_expires_idx
+          ON auth_magic_links(expires_at);
+        CREATE INDEX IF NOT EXISTS auth_sessions_user_idx ON auth_sessions(user_id);
+        CREATE INDEX IF NOT EXISTS auth_sessions_expiry_revoked_idx
+          ON auth_sessions(expires_at, revoked_at);
+      `);
+    } else {
+      await client.executeMultiple(`
+        CREATE TABLE IF NOT EXISTS auth_magic_links (
+          id TEXT PRIMARY KEY, email_normalized TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL, consumed_at TEXT, delivery_status TEXT NOT NULL DEFAULT 'pending',
+          provider_message_id TEXT, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS auth_magic_links_email_created_idx
+          ON auth_magic_links(email_normalized, created_at);
+        CREATE INDEX IF NOT EXISTS auth_magic_links_expires_idx ON auth_magic_links(expires_at);
+        CREATE INDEX IF NOT EXISTS auth_sessions_user_idx ON auth_sessions(user_id);
+        CREATE INDEX IF NOT EXISTS auth_sessions_expiry_revoked_idx ON auth_sessions(expires_at, revoked_at);
+      `);
+    }
+    if (!(await hasColumn(executor, "auth_magic_links", "continuation_id"))) {
+      await executor.execute("ALTER TABLE auth_magic_links ADD COLUMN continuation_id TEXT");
+    }
+    if (!(await hasColumn(executor, "auth_sessions", "pending_invite_id"))) {
+      await executor.execute("ALTER TABLE auth_sessions ADD COLUMN pending_invite_id TEXT");
+    }
+    const continuationTable = `
+      CREATE TABLE IF NOT EXISTS auth_invite_continuations (
+        id TEXT PRIMARY KEY,
+        handle_hash TEXT NOT NULL UNIQUE,
+        invite_id TEXT NOT NULL,
+        intended_email_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        revoked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS ${AUTH_INVITE_CONTINUATION_INDEX_NAMES[0]}
+        ON auth_invite_continuations(invite_id, consumed_at, revoked_at, expires_at);
+      CREATE INDEX IF NOT EXISTS ${AUTH_INVITE_CONTINUATION_INDEX_NAMES[1]}
+        ON auth_invite_continuations(expires_at);
+    `;
+    if (transaction) await transaction.executeMultiple(continuationTable);
+    else await client.executeMultiple(continuationTable);
+
     await executor.execute({
       sql: "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, datetime('now'))",
       args: [READINESS_INTEGRITY_MIGRATION],
@@ -142,6 +220,10 @@ export async function applyIncrementalMigrations(client: Client): Promise<void> 
     await executor.execute({
       sql: "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, datetime('now'))",
       args: [PENDING_SEAT_RESERVATIONS_MIGRATION],
+    });
+    await executor.execute({
+      sql: "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, datetime('now'))",
+      args: [AUTH_INVITE_CONTINUATIONS_MIGRATION],
     });
     if (transaction) await transaction.commit();
     else await client.execute("COMMIT");

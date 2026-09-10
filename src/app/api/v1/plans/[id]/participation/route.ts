@@ -1,4 +1,4 @@
-import { getCurrentUser } from "@/lib/auth/session";
+import { getCurrentSessionContext, getCurrentUser } from "@/lib/auth/session";
 import { apiSuccess, apiError } from "@/lib/api-response";
 import { client, schema } from "@/lib/db";
 import { generateId, hashToken } from "@/lib/auth/crypto";
@@ -19,6 +19,7 @@ import { sameAvailabilityWindows } from "@/lib/plan-inputs/canonical";
 import {
   beginPlanWriteTransaction,
   claimPendingPlanInvite,
+  clearPendingInviteForSession,
   countPlanSeats,
   invalidatePlanDerivedStateInTransaction,
   PlanMutationError,
@@ -55,6 +56,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: planId } = await params;
+  const sessionContext = await getCurrentSessionContext();
   const user = await getCurrentUser();
   if (!user) return apiError("UNAUTHORIZED", "Not signed in", 401);
 
@@ -83,8 +85,8 @@ export async function PUT(
         );
       }
 
-      const inviteToken = extractInviteToken(req, bodyInviteToken);
-      if (!inviteToken) {
+      const inviteToken = sessionContext?.pendingInviteId ? null : extractInviteToken(req, bodyInviteToken);
+      if (!sessionContext?.pendingInviteId && !inviteToken) {
         return apiError(
           "INVITE_REQUIRED",
           "A valid invitation is required to join this plan.",
@@ -92,7 +94,7 @@ export async function PUT(
         );
       }
 
-      const tokenHash = hashToken(inviteToken);
+      const tokenHash = inviteToken ? hashToken(inviteToken) : null;
       const partId = generateId("part");
       const originLabel = coarseOriginLabel || user.coarseArea;
       try {
@@ -100,7 +102,7 @@ export async function PUT(
         try {
           await claimPendingPlanInvite(tx, {
             planId,
-            tokenHash,
+            ...(sessionContext?.pendingInviteId ? { inviteId: sessionContext.pendingInviteId } : { tokenHash: tokenHash! }),
             userId: user.id,
             userEmail: user.email,
             intendedEmailHash: hashIntendedEmail(user.email),
@@ -182,6 +184,12 @@ export async function PUT(
               now,
             ],
           });
+          if (sessionContext?.sessionId && sessionContext.pendingInviteId) {
+            await clearPendingInviteForSession(tx, {
+              sessionId: sessionContext.sessionId,
+              inviteId: sessionContext.pendingInviteId,
+            });
+          }
           await tx.commit();
         } catch (error) {
           await tx.rollback();

@@ -6,8 +6,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hangtime-map-provider-health
+  cancel-in-progress: true
+
 jobs:
   openfreemap:
+    if: vars.HOSTED_CI_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

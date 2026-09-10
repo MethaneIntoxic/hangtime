@@ -225,3 +225,78 @@ Acceptance criteria:
 - A nonce/hash-based CSP and production HSTS are verified without breaking PWA registration or provider integrations.
 - Actions are SHA-pinned, remote database tokens are environment-scoped, and production deployment uses a protected environment plus a narrow Vercel token.
 - Incident, rollback, database recovery, secret rotation, and provider-degradation drills have named owners and evidence.
+
+## Iteration 4 — Opaque invitation continuation contract
+
+This is an approved design contract, not an implementation or production-evidence claim. The source and dated UAT results remain Iteration 3 until migration 0007, code deployment, and the Iteration 4 gates below are actually executed.
+
+| Epic / ticket | Feature and story | Status | Acceptance summary |
+|---|---|---|---|
+| DT-015 | HT-F9.1 Start a private continuation / HT-US-901 Start sign-in without leaking my invitation | Approved; implementation pending | `POST /api/v1/invites/continuation` accepts raw token only in strict same-origin JSON, stores only a keyed random-handle hash, sets one short-lived `__Host-` HttpOnly `SameSite=Lax` cookie, returns generic `no-store` output, and rate-limits by client/email/handle. |
+| DT-016 | HT-F9.2 Bind email and session / HT-US-902 Resume the intended invitation after sign-in | Approved; implementation pending | Magic-link issuance validates the cookie handle and intended email, binds only `continuation_id`, and does not consume the continuation; delivery failure and wrong-email attempts remain retryable. Successful verification atomically consumes the one-use link, claims the continuation, and transfers its invite pointer to the rotated session; the `/join/resume` page calls `GET /api/v1/invites/resume` for a safe preview; participation prioritizes the session pointer and clears it transactionally. |
+| DT-017 | HT-F9.3 Preserve compatibility and recover safely / HT-US-903 Recover from scanners, races, migration, and offline state | Approved; implementation pending | Additive 0007 runs before code deployment, preserves rows, is idempotent/fail-closed, and supports code rollback. GET scanners do not consume state; replay/concurrency/capacity races succeed at most once; bounded raw-body fallback remains only for sessions without a pointer. |
+| DT-018 | Iteration 4 privacy, responsive, and deployed UAT | Approved; implementation pending | Raw token is absent from sign-in/email URLs, referrers, logs, caches, and artifacts; wrong-account/stale/revoked/cross-device recovery is safe; offline and 320px/keyboard flows remain usable; deployed evidence is separated from local pass claims. |
+
+### Iteration 4 acceptance contract
+
+- The browser scrubs `/join/<raw-token>` from history before network navigation and sends the token only in the JSON body of the continuation endpoint. No `next` query, email URL, cookie, response, log, event, referrer, service-worker cache, or analytics field contains the raw token or opaque handle.
+- Continuation, magic-link, resume, verify, and participation responses are `Cache-Control: no-store`; unsafe requests require exact same-origin `Origin`, strict JSON, bounded input, and no state-changing GET.
+- One active pre-email browser continuation is permitted. Already-issued magic links independently support cross-device verification without the pre-email cookie. Missing-cookie behavior never falls back to the latest invite by email.
+- Wrong-account, cross-plan, expired, revoked, superseded, reused, and stale-session cases return safe recovery without plan existence or private metadata. The intended-email/account hash and invite state are revalidated at issuance, verification, resume, and acceptance.
+- Link creation binds `continuation_id` without consuming it; successful link verification atomically consumes the one-use link and claims the continuation, then rotates the session and transfers the invite pointer. Invite claim, seat capacity, and pointer clearing use atomic compare-and-set transactions. Successful acceptance clears `auth_sessions.pending_invite_id`; replay cannot create another participant or overbook the plan.
+- Cleanup removes expired/consumed continuation rows and stale session pointers without deleting preserved invitation history. Rollback is code rollback with additive 0007 retained; destructive down-migration is prohibited.
+
+### Iteration 4 execution graph
+
+```text
+I4-T0 approved contract and threat-model controls
+├─ I4-T1 additive migration 0007 + schema/idempotence/rollback tests
+│  └─ I4-T2 continuation, magic-link, session-pointer primitives
+│     ├─ I4-T3 continuation/magic-link/resume routes
+│     └─ I4-T4 participation precedence + transactional pointer clearing
+├─ I4-T5 join URL scrub, mobile/offline/recovery UI
+└─ I4-T6 unit/integration/browser/security/accessibility UAT matrix
+
+I4-T1 + I4-T2 + I4-T3 + I4-T4 + I4-T5 + I4-T6
+  -> isolated migration verifier -> local gates -> deployment smoke
+  -> authenticated deployed journey -> retain/remove legacy fallback decision
+```
+
+### Iteration 4 synthesis and release disposition
+
+| Classification | Decision |
+|---|---|
+| **ACCEPT** | Opaque random handle cookie, server-side invite binding, `continuation_id` on magic links, `pending_invite_id` on rotated sessions, authenticated token-free resume, and transactional pointer clearing. |
+| **MITIGATE** | Legacy raw-body fallback, generic enumeration responses, exact-origin/JSON enforcement, one-active-continuation bounds, cleanup, no-store headers, race handling, and offline/mobile recovery. |
+| **DEFER** | Remove the legacy fallback only after every supported deployment has 0007 and all maximum session/invite TTLs have elapsed. |
+| **REJECT** | Raw token in `next`, sign-in/email URLs, cookies, query strings, logs, or client-generated IDs; GET consumption; email-only invite selection; and raw-body override of a session-bound invite. |
+
+The main unresolved release risks are authenticated deployed end-to-end evidence, real email delivery, cross-device mailbox testing, and operational proof that logs/analytics/proxies do not retain the raw token. These are evidence gates, not reasons to weaken the approved controls.
+
+## 2026-09-06 verification increment
+
+The existing Iteration 4 implementation is present as uncommitted work; the earlier “implementation pending” rows are historical planning states, not an assertion that these files are absent. Production remains Iteration 3. Current results and defect reproductions are in [the dated UAT record](../uat/UAT_RESULTS_2026-09-06.md).
+
+| Ticket / defect | Epic / feature / story | User story and UAT acceptance | Current disposition |
+|---|---|---|---|
+| DT-019 / HT-DEF-019, HT-DEF-020 | HT-E8 / HT-F8.4 / HT-US-804 | As a diner using a narrow screen or zoom, I can read and submit sign-in. At 320px the card and controls fit; zoom is unrestricted; keyboard and axe checks pass. Cases HT-TC-20260906-003/004. | Verified deployed defects; local correction and rerun required |
+| DT-020 / HT-DEF-021 | HT-E8 / HT-F8.2, HT-F8.5 / HT-US-802, HT-US-805 | As an operator, I can run fixture verification without exposing credentials or modifying live data. Inherited remote canaries are removed and seeder/server/tests use only disposable local databases. Case HT-TC-20260906-009. | Highest-priority safety correction before browser fixture execution |
+| DT-021 / HT-DEF-022 | HT-E8 / HT-F8.5 / HT-US-805 | As the free-tier operator, I control whether hosted runners consume quota. Missing or false runner opt-in skips every hosted job; local checks remain available; deployment needs its separate opt-in. Policy regression tests must reject a bypass. | Local workflow correction; hosted execution still blocked externally |
+
+These increments preserve the approved architecture and additive migration boundary. They do not authorize paid hosting, billing changes, remote seed/reset, or broad production test-data mutation. Renaming one account does not satisfy multi-actor UAT.
+
+### Next invitation-hardening increment — 2026-09-07 council synthesis
+
+| Ticket | Story / cases | Decision and completion condition |
+|---|---|---|
+| DT-022 | HT-US-901 / HT-DEF-023, HT-DEF-024 | ACCEPT: reproduce and remove authenticated raw-token URL propagation and nested email return-path propagation. Keep only supported token-free navigation destinations. |
+| DT-023 | HT-US-902, HT-US-903 / HT-DEF-025 | ACCEPT: recover from revoked/reissued/expired session pointers through an explicit same-origin mutation; GET remains read-only and raw request data cannot override a live pointer. |
+| DT-024 | HT-US-902, HT-US-903 / HT-DEF-026 | ACCEPT: reproduce two-issued-link session rotation and preserve or safely reject the second verification without stranding a valid pending invitation. |
+| DT-025 | HT-US-901, HT-US-903 / HT-DEF-027 | MITIGATE: enforce transport byte bounds before JSON parsing and prove production cookie deletion with a real cookie jar. Do not infer browser behavior solely from source. |
+| DT-026 | HT-US-801, HT-US-805 | ACCEPT boundary repro: stop accepting an arbitrary Fly client-IP header on Vercel. Deployment exploitability is unverified; demonstrate trusted-ingress selection locally before claiming the rate limit fixed. |
+
+Council compatibility concern about unbound legacy invite rows requires scope validation: intended-account binding existed in Iteration 3/0006, so a pre-0006 row does not by itself demonstrate a 0006-to-0007 regression. Retain the compatibility gate, but do not label that claim a reproduced migration defect without a supported baseline fixture.
+
+Execution sequence: freeze recovery/return-path contracts, add failing regression scenarios, implement isolated transport and session corrections, integrate acceptance/cookie behavior, then rerun migration/unit/browser/production gates. Hosted execution, Preview, and production promotion remain separate evidence gates.
+
+2026-09-08: DT-022 partially complete. HT-DEF-024 nested/encoded email return-path propagation is fixed locally with red-before-green captured-email regression (13/13 after final integration), targeted lint, and TypeScript checks. HT-DEF-023 authenticated raw-token join remains open; no production promotion occurred. See [September 8 evidence](../uat/UAT_RESULTS_2026-09-08.md).

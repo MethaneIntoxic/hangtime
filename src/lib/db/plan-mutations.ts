@@ -307,13 +307,17 @@ export async function claimPendingPlanInvite(
   tx: SqlExecutor,
   input: {
     planId: string;
-    tokenHash: string;
+    tokenHash?: string;
+    inviteId?: string;
     userId: string;
     userEmail: string;
     intendedEmailHash: string;
     now: string;
   },
 ): Promise<ClaimedPlanInvite> {
+  const lookupColumn = input.inviteId ? "id" : "token_hash";
+  const lookupValue = input.inviteId ?? input.tokenHash;
+  if (!lookupValue) throw new PlanMutationError("INVITE_UNAVAILABLE", "This invitation is no longer available.", 403);
   const planResult = await tx.execute({
     sql: "SELECT state FROM plans WHERE id = ?",
     args: [input.planId],
@@ -333,8 +337,8 @@ export async function claimPendingPlanInvite(
                  revoked_at AS revokedAt,
                  superseded_by_invite_id AS supersededByInviteId
             FROM plan_invites
-           WHERE plan_id = ? AND token_hash = ?`,
-    args: [input.planId, input.tokenHash],
+           WHERE plan_id = ? AND ${lookupColumn} = ?`,
+    args: [input.planId, lookupValue],
   });
   const row = result.rows[0];
   if (!row) throw new PlanMutationError("INVITE_UNAVAILABLE", "This invitation is no longer available.", 403);
@@ -370,12 +374,12 @@ export async function claimPendingPlanInvite(
   const claimed = await tx.execute({
     sql: `UPDATE plan_invites
              SET accepted_at = ?, accepted_user_id = ?
-           WHERE plan_id = ? AND token_hash = ?
+           WHERE plan_id = ? AND ${lookupColumn} = ?
              AND accepted_at IS NULL
              AND revoked_at IS NULL
              AND superseded_by_invite_id IS NULL
              AND expires_at > ?`,
-    args: [input.now, input.userId, input.planId, input.tokenHash, input.now],
+    args: [input.now, input.userId, input.planId, lookupValue, input.now],
   });
   if (claimed.rowsAffected !== 1) {
     throw new PlanMutationError("INVITE_UNAVAILABLE", "This invitation is no longer available.", 403);
@@ -386,6 +390,16 @@ export async function claimPendingPlanInvite(
     reservedUserId: row.reservedUserId === null ? null : String(row.reservedUserId),
     intendedEmailHash: String(row.intendedEmailHash),
   };
+}
+
+export async function clearPendingInviteForSession(
+  tx: SqlExecutor,
+  input: { sessionId: string; inviteId: string },
+): Promise<void> {
+  await tx.execute({
+    sql: "UPDATE auth_sessions SET pending_invite_id = NULL WHERE id = ? AND pending_invite_id = ?",
+    args: [input.sessionId, input.inviteId],
+  });
 }
 
 export async function supersedePendingPlanInvite(

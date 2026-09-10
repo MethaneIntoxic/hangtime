@@ -23,6 +23,7 @@ env:
 jobs:
   deploy-preview:
     if: >-
+      vars.HOSTED_CI_ENABLED == 'true' &&
       vars.FREE_TIER_DEPLOYMENTS_ENABLED == 'true' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&

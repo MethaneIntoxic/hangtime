@@ -1,40 +1,66 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, MapPin } from "lucide-react";
+import { safeReturnTo } from "@/app/join/join-flow";
 
 function VerifyContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<"idle" | "verifying" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [retryable, setRetryable] = useState(false);
+  const tokenRef = useRef<string | null>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const next = safeReturnTo(searchParams.get("next"));
+
+  useEffect(() => {
+    if (status === "error") errorRef.current?.focus();
+  }, [status]);
+
+  useEffect(() => {
+    const requestedNext = searchParams.get("next");
+    if (requestedNext === next) return;
+    const query = next === "/" ? "" : `?next=${encodeURIComponent(next)}`;
+    window.history.replaceState(null, "", `${window.location.pathname}${query}${window.location.hash}`);
+  }, [next, searchParams]);
 
   const verify = async () => {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
-    const token = fragment.get("token") || "";
+    const token = tokenRef.current || fragment.get("token") || "";
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     if (!token) {
       setStatus("error");
       setMessage("This sign-in link is invalid or expired.");
+      setRetryable(false);
       return;
     }
+    tokenRef.current = token;
     setStatus("verifying");
     setMessage("");
-    const response = await fetch("/api/v1/auth/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
+    try {
+      const response = await fetch("/api/v1/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        body: JSON.stringify({ token }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setStatus("error");
+        setMessage(payload?.error?.message || "This sign-in link could not be verified.");
+        setRetryable(false);
+        return;
+      }
+      router.replace(next);
+    } catch {
       setStatus("error");
-      setMessage(payload?.error?.message || "This sign-in link could not be verified.");
-      return;
+      setMessage("We couldn’t verify the link because the connection was interrupted. Try again.");
+      setRetryable(true);
     }
-    const next = searchParams.get("next");
-    router.replace(next?.startsWith("/") && !next.startsWith("//") ? next : "/");
   };
 
   return (
@@ -56,11 +82,11 @@ function VerifyContent() {
           disabled={status === "verifying"}
           className="mt-7 min-h-12 w-full border border-terra-800 bg-terra-600 px-5 py-3 font-bold text-white shadow-[4px_4px_0_#6d291b] hover:bg-terra-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {status === "verifying" ? "Signing you in…" : "Sign in securely"}
+          {status === "verifying" ? "Signing you in…" : retryable ? "Try verification again" : "Sign in securely"}
         </button>
         {status === "error" && (
-          <p className="mt-5 border border-red-700/30 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
-            {message} <Link href="/sign-in" className="font-bold underline">Request a new link</Link>
+          <p ref={errorRef} tabIndex={-1} className="mt-5 border border-red-700/30 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            {message} <Link href={next === "/join/resume" ? "/sign-in?next=/join/resume" : "/sign-in"} className="font-bold underline">Request a new link</Link>
           </p>
         )}
         <Link href="/sign-in" className="mt-7 inline-flex min-h-11 items-center gap-2 text-sm font-bold text-ink-600 hover:underline">

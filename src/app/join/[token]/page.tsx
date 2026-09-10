@@ -8,75 +8,14 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { formatDateLabel } from "@/lib/utils";
 import { SINGAPORE_PLANNING_AREAS } from "@/providers/singapore-transit";
-
-type InvitePreview = {
-  id: string;
-  mealType: string;
-  date: string;
-  windowStart: string;
-  windowEnd: string;
-  organizerDisplayName: string;
-};
-
-type SafeInviteError = {
-  code: string;
-  title: string;
-  message: string;
-  action: "sign-in" | "retry" | "home";
-};
-
-class InviteFlowError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-  }
-}
-
-function safeInviteError(code: string, status: number): SafeInviteError {
-  if (code === "UNAUTHORIZED" || status === 401) {
-    return {
-      code,
-      title: "Sign in to accept this invitation",
-      message: "Sign in with the account this invitation was sent to, then return here to finish joining.",
-      action: "sign-in",
-    };
-  }
-  if (code === "INVITE_EMAIL_MISMATCH") {
-    return {
-      code,
-      title: "This invitation is for a different account",
-      message: "Switch to the intended account to accept this invitation. No plan details were shared.",
-      action: "sign-in",
-    };
-  }
-  if (code === "INVITE_EXPIRED") {
-    return { code, title: "This invitation has expired", message: "Ask the organizer to reissue the invitation link.", action: "home" };
-  }
-  if (code === "INVITE_REVOKED") {
-    return { code, title: "This invitation was revoked", message: "Ask the organizer for a new invitation if you still want to join.", action: "home" };
-  }
-  if (code === "INVITE_ALREADY_USED" || code === "INVITE_SUPERSEDED" || code === "INVITE_UNAVAILABLE") {
-    return { code, title: "This invitation is no longer available", message: "It has already been used or replaced. Ask the organizer for help.", action: "home" };
-  }
-  if (code === "GROUP_FULL") {
-    return { code, title: "This plan is full", message: "The organizer needs to open another seat or start a new plan.", action: "home" };
-  }
-  if (code === "PLAN_UNAVAILABLE") {
-    return { code, title: "This plan is no longer accepting diners", message: "Ask the organizer if there is another plan to join.", action: "home" };
-  }
-  if (["INVALID_INVITE", "INVITE_REQUIRED"].includes(code)) {
-    return { code, title: "Invitation unavailable", message: "This invitation link is invalid or no longer available.", action: "home" };
-  }
-  return {
-    code,
-    title: "Invitation unavailable",
-    message: "We could not check this invitation. Try again, or return home and open the link again.",
-    action: "retry",
-  };
-}
-
-function errorFromPayload(payload: { error?: { code?: string; message?: string } } | null, status: number) {
-  return safeInviteError(payload?.error?.code || "UNKNOWN", status);
-}
+import {
+  errorFromPayload,
+  InviteFlowError,
+  invitePreviewFromPayload,
+  safeInviteError,
+  type InvitePreview,
+  type SafeInviteError,
+} from "@/app/join/join-flow";
 
 export default function JoinPlanPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -88,53 +27,93 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
   const hasSelectedAreaRef = useRef(false);
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<SafeInviteError | null>(null);
+  const [isContinuing, setIsContinuing] = useState(false);
+  const [continuationError, setContinuationError] = useState<SafeInviteError | null>(null);
+  const loadSequence = useRef(0);
+  const loadErrorRef = useRef<HTMLElement>(null);
+  const continuationErrorRef = useRef<HTMLDivElement>(null);
+  const joinErrorRef = useRef<HTMLDivElement>(null);
 
   const loadInvite = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     setInvite(null);
     setLoadError(null);
     try {
-      const response = await fetch(`/api/v1/invites/${encodeURIComponent(token)}`, { cache: "no-store" });
+      // Do not disclose the bearer token to the preview endpoint until the
+      // session boundary has established that this is an authenticated load.
+      const sessionResponse = await fetch("/api/v1/me", {
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+      });
+      if (sequence !== loadSequence.current) return;
+      if (!sessionResponse.ok) {
+        setLoadError(safeInviteError(sessionResponse.status === 401 ? "UNAUTHORIZED" : "UNKNOWN", sessionResponse.status));
+        return;
+      }
+      const sessionPayload = await sessionResponse.json().catch(() => null);
+      if (sequence !== loadSequence.current) return;
+      const profileArea = sessionPayload?.data?.profile?.coarseArea;
+      const supportedArea = SINGAPORE_PLANNING_AREAS.find((area) => area.label === profileArea)?.label;
+      if (!hasSelectedAreaRef.current && supportedArea) setSelectedArea(supportedArea);
+
+      const response = await fetch(`/api/v1/invites/${encodeURIComponent(token)}`, {
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+      });
       const payload = await response.json().catch(() => null);
+      if (sequence !== loadSequence.current) return;
       if (!response.ok) {
         setLoadError(errorFromPayload(payload, response.status));
         return;
       }
-      setInvite(payload?.data?.plan ?? null);
+      const parsedInvite = invitePreviewFromPayload(payload);
+      if (!parsedInvite) {
+        setLoadError(safeInviteError("UNKNOWN", response.status));
+        return;
+      }
+      setInvite(parsedInvite);
     } catch {
+      if (sequence !== loadSequence.current) return;
       setLoadError(safeInviteError("UNKNOWN", 0));
     }
   }, [token]);
+
+  const continueToSignIn = async () => {
+    if (isContinuing) return;
+    setIsContinuing(true);
+    setContinuationError(null);
+    window.history.replaceState(null, "", "/join");
+    try {
+      const response = await fetch("/api/v1/invites/continuation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        body: JSON.stringify({ inviteToken: token }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setContinuationError(errorFromPayload(payload, response.status));
+        return;
+      }
+      router.replace("/sign-in?next=/join/resume");
+    } catch {
+      setContinuationError(safeInviteError("UNKNOWN", 0));
+    } finally {
+      setIsContinuing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (continuationError) continuationErrorRef.current?.focus();
+    else if (joinError) joinErrorRef.current?.focus();
+    else if (loadError) loadErrorRef.current?.focus();
+  }, [continuationError, joinError, loadError]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadInvite(), 0);
     return () => window.clearTimeout(timer);
   }, [loadInvite]);
-
-  useEffect(() => {
-    let active = true;
-    const timer = window.setTimeout(() => {
-      void fetch("/api/v1/me", { cache: "no-store" })
-        .then(async (response) => {
-          if (!response.ok) return null;
-          return response.json().catch(() => null);
-        })
-        .then((payload: { data?: { profile?: { coarseArea?: unknown } } } | null) => {
-          const profileArea = payload?.data?.profile?.coarseArea;
-          const supportedArea = SINGAPORE_PLANNING_AREAS.find((area) => area.label === profileArea)?.label;
-          if (active && !hasSelectedAreaRef.current && supportedArea) {
-            setSelectedArea(supportedArea);
-          }
-        })
-        .catch(() => {
-          // The fallback remains usable when the optional profile read fails.
-        });
-    }, 0);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, []);
 
   const handleJoin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -185,7 +164,7 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
         </div>
 
         {loadError ? (
-          <section className="mt-8 border border-berry-500/30 bg-berry-100 p-6 text-center" role="alert">
+          <section ref={loadErrorRef} tabIndex={-1} className="mt-8 border border-berry-500/30 bg-berry-100 p-6 text-center" role="alert">
             <h2 className="font-display text-xl font-semibold text-berry-700">{loadError.title}</h2>
             <p className="mt-2 text-sm leading-6 text-ink-700">{loadError.message}</p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -193,9 +172,10 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
                 <Button
                   variant="primary"
                   size="md"
-                  onClick={() => router.push(`/sign-in?next=${encodeURIComponent(`/join/${token}`)}`)}
+                  onClick={() => void continueToSignIn()}
+                  isLoading={isContinuing}
                 >
-                  Continue to sign in
+                  Continue securely
                 </Button>
               )}
               {loadError.action === "retry" && (
@@ -203,6 +183,15 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
               )}
               <Button variant="outline" size="md" onClick={() => router.push("/")}>Return home</Button>
             </div>
+            {continuationError && (
+              <div ref={continuationErrorRef} tabIndex={-1} className="mt-4 border border-berry-500/30 bg-berry-100 px-4 py-3 text-left text-sm text-berry-800" role="alert">
+                <p className="font-semibold">{continuationError.title}</p>
+                <p className="mt-1">{continuationError.message}</p>
+                <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void continueToSignIn()}>
+                  Try again
+                </Button>
+              </div>
+            )}
           </section>
         ) : !invite ? (
           <div role="status" aria-live="polite" aria-busy="true" className="mt-8 h-80 animate-pulse-soft border border-ink-900/15 bg-cream-100" aria-label="Checking invitation" />
@@ -219,7 +208,7 @@ export default function JoinPlanPage({ params }: { params: Promise<{ token: stri
 
             <form onSubmit={handleJoin} className="mt-6 space-y-5" aria-describedby={joinError ? "join-error" : undefined}>
               {joinError && (
-                <div id="join-error" role="alert" className="border border-berry-500/30 bg-berry-100 px-4 py-3 text-sm text-berry-800">
+                <div ref={joinErrorRef} id="join-error" tabIndex={-1} role="alert" className="border border-berry-500/30 bg-berry-100 px-4 py-3 text-sm text-berry-800">
                   <p className="font-semibold">{joinError.title}</p>
                   <p className="mt-1">{joinError.message}</p>
                   {joinError.action === "retry" && (

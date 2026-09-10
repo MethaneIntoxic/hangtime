@@ -30,6 +30,13 @@ export interface NewProductionSession {
   token: string;
   sessionId: string;
   expiresAt: string;
+  pendingInviteId: string | null;
+}
+
+export interface ProductionSessionContext {
+  sessionId: string;
+  userId: string;
+  pendingInviteId: string | null;
 }
 
 type Executor = Pick<Client | Transaction, "execute">;
@@ -38,6 +45,7 @@ export async function createProductionSession(
   userId: string,
   database: Executor = client,
   nowMs = Date.now(),
+  options: { pendingInviteId?: string | null } = {},
 ): Promise<NewProductionSession> {
   const token = generateToken(32);
   const sessionId = generateId("session");
@@ -46,11 +54,34 @@ export async function createProductionSession(
   await database.execute({
     sql:
       `INSERT INTO auth_sessions
-       (id, user_id, token_hash, expires_at, revoked_at, created_at, last_seen_at)
-       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
-    args: [sessionId, userId, hashToken(token), expiresAt, now, now],
+       (id, user_id, token_hash, expires_at, revoked_at, created_at, last_seen_at, pending_invite_id)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
+    args: [sessionId, userId, hashToken(token), expiresAt, now, now, options.pendingInviteId ?? null],
   });
-  return { token, sessionId, expiresAt };
+  return { token, sessionId, expiresAt, pendingInviteId: options.pendingInviteId ?? null };
+}
+
+export async function productionSessionContext(
+  token: string,
+  database: Executor = client,
+  nowMs = Date.now(),
+): Promise<ProductionSessionContext | null> {
+  if (!token || token.length > 256) return null;
+  const now = new Date(nowMs).toISOString();
+  const result = await database.execute({
+    sql:
+      `SELECT id AS sessionId, user_id AS userId, pending_invite_id AS pendingInviteId
+       FROM auth_sessions
+       WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?`,
+    args: [hashToken(token), now],
+  });
+  const row = result.rows[0];
+  if (!row || typeof row.sessionId !== "string" || typeof row.userId !== "string") return null;
+  return {
+    sessionId: row.sessionId,
+    userId: row.userId,
+    pendingInviteId: typeof row.pendingInviteId === "string" ? row.pendingInviteId : null,
+  };
 }
 
 export async function productionSessionUserId(
@@ -59,16 +90,7 @@ export async function productionSessionUserId(
   nowMs = Date.now(),
 ): Promise<string | null> {
   if (!token || token.length > 256) return null;
-  const now = new Date(nowMs).toISOString();
-  const result = await database.execute({
-    sql:
-      `SELECT user_id AS userId
-       FROM auth_sessions
-       WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?`,
-    args: [hashToken(token), now],
-  });
-  const userId = result.rows[0]?.userId;
-  return typeof userId === "string" ? userId : null;
+  return (await productionSessionContext(token, database, nowMs))?.userId ?? null;
 }
 
 export async function revokeProductionSession(
@@ -79,7 +101,7 @@ export async function revokeProductionSession(
   if (!token || token.length > 256) return;
   await database.execute({
     sql:
-      `UPDATE auth_sessions SET revoked_at = ?
+      `UPDATE auth_sessions SET revoked_at = ?, pending_invite_id = NULL
        WHERE token_hash = ? AND revoked_at IS NULL`,
     args: [new Date(nowMs).toISOString(), hashToken(token)],
   });

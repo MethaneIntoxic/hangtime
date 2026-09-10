@@ -30,7 +30,7 @@ permissions:
 
 jobs:
   rollback:
-    if: inputs.database_compatible == true && inputs.confirm_free_tier == true && vars.FREE_TIER_DEPLOYMENTS_ENABLED == 'true'
+    if: vars.HOSTED_CI_ENABLED == 'true' && inputs.database_compatible == true && inputs.confirm_free_tier == true && vars.FREE_TIER_DEPLOYMENTS_ENABLED == 'true'
     environment: production
     runs-on: ubuntu-24.04
     timeout-minutes: 10

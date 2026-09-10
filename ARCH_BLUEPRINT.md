@@ -269,6 +269,9 @@ The current schema uses application-generated text IDs (for example `user_*`, `p
 
 | Table | Essential fields and rules |
 |---|---|
+| `auth_invite_continuations` | Additive 0007 table: unique keyed hash of a random browser handle, bound invite ID and intended-email hash, short expiry, consumed/revoked state, and timestamps. It never stores a raw invite token, handle, email, or plan payload. One active pre-email browser continuation is allowed; already-issued magic links do not depend on this cookie. |
+| `auth_magic_links` | Existing one-use, short-lived email token ledger extended with nullable `continuation_id`; the binding is server-only and must not appear in email URLs, logs, projections, or events. Issuance validates but does not consume the continuation. |
+| `auth_sessions` | Existing opaque session ledger extended with nullable `pending_invite_id`; the pointer is transferred only to a newly rotated session after successful magic-link consumption and cleared transactionally on acceptance/sign-out/expiry. |
 | `notification_outbox` | Current seam: recipient, channel, template, JSON payload, sent timestamp, and created timestamp. A dispatcher, idempotency key, attempt/dead-letter fields, and safe-payload enforcement are required by DT-011 before plan-event delivery is claimed. |
 | `push_subscriptions` | Planned only; no current API/table or delivery evidence. If added, endpoint/keys must be encrypted, owner-bound, revocable, and absent from client/log/analytics payloads. |
 | `feedback` | Plan, participant, recommendation satisfaction 1–5, reuse intent boolean, optional reason, timestamps. |
@@ -400,6 +403,9 @@ The release target is for all JSON endpoints to validate with Zod, require CSRF-
 | `POST /api/v1/plans/:id/invites/:inviteId/reissue` | Atomically revoke/supersede one pending reservation and create a replacement. An explicit manual-share response may return one `inviteUrl` once with `Cache-Control: no-store`; it never returns a separate token field. | Implemented; local/API/browser coverage recorded in 2026-08-22 UAT results; deployed authenticated journey remains pending |
 | `DELETE /api/v1/plans/:id/invites/:inviteId` | Organizer-only revocation of a still-pending reservation; accepted/terminal reservations fail with stable `409`. | Implemented; local/API/browser coverage recorded in 2026-08-22 UAT results; deployed authenticated journey remains pending |
 | `PUT /api/v1/plans/:id/participation` | Atomically claim one live, intended-account/email-bound reservation, insert exactly one active participant, save private location/availability, and consume the reservation; or update an existing member's deliberate readiness. Material changes invalidate derived state. | Implemented; local/API/browser coverage recorded in 2026-08-22 UAT results; deployed authenticated journey remains pending |
+| `POST /api/v1/invites/continuation` | Anonymous JSON-only handoff: accept the raw invite token only in the request body, validate its bound reservation, persist only a short-lived hash of a random continuation handle, and set one `__Host-` HttpOnly cookie. The response is generic and contains no token, invite ID, plan data, or email result. | Iteration 4 approved contract; implementation pending 0007 |
+| `GET /api/v1/invites/resume` | Authenticated, token-free JSON resume preview from the session's `pending_invite_id`; revalidate invite, plan state, expiry, revocation, supersession, and intended account before returning safe plan metadata. The `/join/resume` page consumes this endpoint. | Iteration 4 approved contract; implementation pending 0007 |
+| `POST /api/v1/auth/magic-link` | Read the continuation cookie and requested email, validate the intended-email hash, and create a magic link carrying only `continuation_id`; issuance does not consume the continuation, so delivery failure and wrong-email attempts do not strand it. Successful verification later claims the continuation and transfers its invite to the rotated session. Already-issued links remain independently usable on another device. | Iteration 4 approved contract; implementation pending 0007 |
 | `POST /api/v1/plans/:id/recommendations` | Validate every participant's readiness evidence and create one versioned run; concurrent retries converge on the committed run. The current MVP completes the deterministic curated run synchronously. | Implemented and covered locally; durable async worker planned |
 | `GET /api/v1/plans/:id/recommendations/:runId` | Poll queued/running/ready/failed state. | Planned |
 | `POST /api/v1/plans/:id/voting/open` | Organizer freezes current run and opens voting. | Implemented |
@@ -625,6 +631,49 @@ T3 + T4 + T5 + T6 -> T7 full gates -> T8 isolated migration -> T9 deployment smo
 
 Iteration 3 definition of done: saved companion selection creates a live reservation but no member; accepted plus live reserved seats never exceed three under concurrency; only the intended signed-in account can accept; revoke/reissue is atomic; organizer projections contain no bearer secret or private profile fields; recommendation generation requires at least two accepted ready participants; legacy active members remain unchanged; migration, unit, API, browser, accessibility, build, PWA, map, security, and production-safe smoke gates pass before promotion. The implementation is deployed at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5`, Production Turso 0006 postconditions and one production smoke pass are recorded, while authenticated deployed E2E, Preview provisioning, real email resend, physical-device, and backup/restore evidence remain broader-release gates.
 
+### Iteration 4 execution graph — opaque invitation continuation
+
+Iteration 4 separates the bearer invite URL from the authenticated continuation. The raw invite token is accepted once by `POST /api/v1/invites/continuation` in strict JSON, never placed into a sign-in or email URL, and never returned. The server generates a cryptographically random handle, stores only its keyed hash in additive `auth_invite_continuations`, and sets a short-lived `__Host-` HttpOnly cookie. One active pre-email browser continuation is allowed; already-issued magic links are independent of that browser cookie and therefore support cross-device verification.
+
+Migration 0007 adds, before code deployment, `auth_invite_continuations`, `auth_magic_links.continuation_id`, and `auth_sessions.pending_invite_id` with additive compatible changes. The migration must preflight schema state, run transactionally where supported, preserve all invite and auth rows, and fail closed without destructive cleanup. Rollback is code rollback with the additive schema retained; no remote migration is run until disposable migration, idempotence, ordering, and rollback-safety checks pass.
+
+The approved state flow is:
+
+```text
+/join/<raw-token>
+  -> scrub URL/history immediately
+  -> POST JSON token to /api/v1/invites/continuation
+  -> hash random handle + set __Host continuation cookie
+  -> POST magic-link email with cookie + normalized email
+  -> validate handle/email + create auth_magic_links row carrying continuation_id (not consumed)
+  -> email fragment contains only magic-link token
+  -> verify atomically consumes link + claims continuation + creates rotated auth session with pending_invite_id
+  -> /join/resume page calls GET /api/v1/invites/resume for a safe preview
+  -> PUT participation uses session-bound invite, claims capacity, and clears pointer
+```
+
+Security and privacy invariants:
+
+- Every continuation, resume, magic-link, verify, and participation response is `Cache-Control: no-store`; continuation and magic-link requests require exact same-origin `Origin`, strict JSON schemas, and no state-changing GET.
+- The continuation cookie is `__Host-` scoped (`Secure` in production, `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain`) with a short maximum lifetime. It is a handle, not an identity credential; it never contains a raw token, invite ID, email, or plan ID.
+- Magic-link issuance returns the same generic result for unknown, expired, revoked, wrong-email, and valid inputs. Rate limits cover client address, normalized email, and handle hash; active continuation creation is bounded per browser/invite.
+- Magic-link issuance validates the handle and intended email and binds `continuation_id` without consuming it; delivery failure and wrong-email attempts therefore do not strand the continuation. Verification atomically consumes the one-use link and claims the continuation, then creates the rotated session with `pending_invite_id`; the old session cannot retain the invite context.
+- Resume and acceptance revalidate invite ID, plan ID, intended-email hash, reserved user, expiry, revocation, supersession, joinable state, and capacity. Participation prefers the session-bound invite; the bounded raw-body fallback applies only when no session pointer exists and cannot override a session-bound invite.
+- Successful acceptance clears `auth_sessions.pending_invite_id` in the same transaction as the invite claim. Sign-out, expiry, revocation, supersession, and unrecoverable mismatch clear stale continuation state. Cleanup deletes expired/consumed continuation rows without deleting preserved invite history.
+- Link-scanner and prefetch `GET` requests never consume a continuation, magic link, seat, or session. Only explicit JSON `POST`/`PUT` actions consume state.
+- Raw tokens, handles, continuation IDs, pending invite IDs, intended emails, and precise locations are absent from logs, analytics, events, referrers, service-worker caches, error bodies, and participant-safe projections.
+
+Synthesis classifications:
+
+| Decision | Contract conclusion |
+|---|---|
+| **ACCEPT** | Opaque random handle cookie, server-side invite binding, magic-link `continuation_id`, rotated session transfer to session `pending_invite_id`, authenticated `/join/resume`, and transactional pointer clearing are the approved architecture. |
+| **MITIGATE** | Bounded legacy raw-body fallback, generic enumeration responses, exact-origin/JSON enforcement, one-active-continuation limits, cleanup, replay/concurrency controls, no-store headers, and mobile/offline recovery are mandatory implementation controls. |
+| **DEFER** | Remove the legacy raw-body fallback only after every supported deployment has 0007 and its maximum session/invite TTL has elapsed; retain monitoring and a safe migration rollback path until then. |
+| **REJECT** | Raw tokens in `next`, sign-in/email URLs, cookies, query strings, logs, or client-generated invite IDs; GET-based consumption; email-only invite lookup; fallback to the latest pending invite; and allowing a raw body to override a session-bound invite are prohibited. |
+
+UX contract: the join screen scrubs the token before network navigation, shows a loading state while continuation is created, provides generic retry/reopen/reissue recovery, and never renders private plan details before authenticated validation. Wrong-account responses say only that the invitation is for a different account and reveal no plan existence. An issued magic link can complete on another device; if the pre-email cookie is absent, the link still verifies and the new session carries the invite. `/join/resume` and errors remain usable offline as a safe retry/reopen state, with no claim that an acceptance succeeded. The 320px layout must preserve readable error copy, keyboard focus, a 44px-equivalent action target, and no horizontal overflow.
+
 ### Phase 3 — recommendation engine (6–9 days)
 
 - Implement provider interfaces, OneMap adapters, the MapLibre/OpenFreeMap candidate map, and explicit local fallback metadata.
@@ -728,6 +777,10 @@ Avoid declaring `meal_completed` solely because time passed. It is only a proxy 
 ### Monetization, only after trust is established
 
 If tested, sponsored venues must be explicitly labelled, must satisfy every hard constraint, and must never alter the organic score or appear as the organic winner. Measure whether sponsorship damages satisfaction or repeat planning before expanding it.
+
+## 2026-09-08 correction contract: email return destinations
+
+HT-DEF-024 / DT-022 narrows magic-link email continuation to the exact values `/` and `/join/resume`. A valid server-bound invitation always selects `/join/resume`; otherwise unsupported values, including arbitrary deep links, queries, fragments, or encoded nested paths, return to `/`. The root destination needs no `next` query in the email. This intentionally trades unbound deep-link convenience for an auditable token-free email navigation contract. It does not change the magic-link authentication token in the fragment, invitation authorization, or session binding. Regression cases inspect the captured email URL without delivering real email. Other Iteration 4 release blockers remain open.
 
 ## 20. Current external facts used in this blueprint
 

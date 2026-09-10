@@ -31,6 +31,10 @@ Production variables:
 
 Optional repository variable:
 
+- `HOSTED_CI_ENABLED` — set to the literal `true` only during an intentional
+  GitHub-hosted runner validation window. Leave it unset (the safe default) to
+  keep every hosted workflow job skipped before runner allocation. See
+  `docs/CI_COST_POLICY.md`.
 - `FREE_TIER_DEPLOYMENTS_ENABLED` — set to the literal `true` only when an
   operator intentionally wants the trusted Preview workflow and protected
   deployment workflows to consume Vercel/Turso free-tier quota. Leave it
@@ -43,6 +47,10 @@ spending restriction blocks hosted runners, a workflow can be accepted with
 zero steps and runner id `0`. Treat that as remote validation not executed,
 not as a passing or failing application test. This runbook never changes
 billing, spending limits, or paid-service settings.
+The independent `HOSTED_CI_ENABLED` repository variable must be set to the
+literal `true` before any hosted job is dispatched; it does not enforce an
+account-level budget after enabling and does not replace GitHub billing
+controls.
 
 ## Zero-cost validation profiles
 
@@ -73,8 +81,8 @@ The runtime fails closed on Vercel if Turso credentials are missing. Builds and 
 
 ## Release flow
 
-1. A pull request and main push run the secret-free fast validation and security workflows. Browser UAT and production-shell E2E remain separate jobs, so local operators can choose the cost/time boundary.
-2. Set `FREE_TIER_DEPLOYMENTS_ENABLED=true` only for an intentional release window. A successful trusted main push then runs `Deploy trusted preview`; it migrates only the Preview database, builds the exact source SHA, deploys it, and smoke-tests the immutable Vercel URL. The workflow is restricted to a successful same-repository main push and never runs with pull-request secrets.
+1. A pull request and main push can process the secret-free fast validation and security workflows only when `HOSTED_CI_ENABLED=true`; otherwise their hosted jobs are skipped before runner allocation. Browser UAT and production-shell E2E remain separate jobs, so local operators can choose the cost/time boundary.
+2. Set both `HOSTED_CI_ENABLED=true` and `FREE_TIER_DEPLOYMENTS_ENABLED=true` only for an intentional release window. A successful trusted main push then runs `Deploy trusted preview`; it migrates only the Preview database, builds the exact source SHA, deploys it, and smoke-tests the immutable Vercel URL. The workflow is restricted to a successful same-repository main push and never runs with pull-request secrets.
 3. Manually run `Deploy production` with that full source SHA and preview URL, set the required `confirm_free_tier` input to `true`, and use the protected `production` environment.
 4. The protected job rechecks Preview, migrates Production, validates the complete production environment, creates a staged Production deployment with `--skip-domain`, smoke-tests it, and only then promotes it.
 5. `release:metadata` validates that the SHA is a real commit in the checked-out tree and records source SHA, channel, and immutable deployment URL in the workflow summary. Record the workflow URLs, source SHA, immutable deployment URL, schema versions, key version, and approver. Never record tokens, invite URLs, precise origins, or database dumps.
@@ -101,8 +109,9 @@ Run the local profiles above from the exact reviewed commit. If they pass, a
 maintainer may use the Vercel CLI and Turso CLI manually during an explicit
 release window, following the same source-SHA, isolated-environment,
 backward-compatible-migration, and smoke-test gates. Do not copy production
-secrets into a PR checkout. Keep `FREE_TIER_DEPLOYMENTS_ENABLED` unset until
-hosted runners and the free-tier quotas have been checked. A local pass is
+secrets into a PR checkout. Keep `HOSTED_CI_ENABLED` and
+`FREE_TIER_DEPLOYMENTS_ENABLED` unset until hosted runners and the free-tier
+quotas have been checked. A local pass is
 useful evidence, but it does not claim GitHub runner, Vercel deployment, Turso
 remote migration, Resend delivery, or physical-device validation.
 

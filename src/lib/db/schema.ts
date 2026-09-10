@@ -226,7 +226,19 @@ export const authMagicLinks = sqliteTable("auth_magic_links", {
   consumedAt: text("consumed_at"),
   deliveryStatus: text("delivery_status").notNull().default("pending"),
   providerMessageId: text("provider_message_id"),
+  continuationId: text("continuation_id"),
   createdAt: text("created_at").notNull(),
+});
+
+export const authInviteContinuations = sqliteTable("auth_invite_continuations", {
+  id: text("id").primaryKey(),
+  handleHash: text("handle_hash").notNull().unique(),
+  inviteId: text("invite_id").notNull(),
+  intendedEmailHash: text("intended_email_hash").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+  revokedAt: text("revoked_at"),
 });
 
 export const authSessions = sqliteTable("auth_sessions", {
@@ -237,6 +249,7 @@ export const authSessions = sqliteTable("auth_sessions", {
   revokedAt: text("revoked_at"),
   createdAt: text("created_at").notNull(),
   lastSeenAt: text("last_seen_at").notNull(),
+  pendingInviteId: text("pending_invite_id"),
 });
 
 export const authRateLimits = sqliteTable("auth_rate_limits", {

@@ -20,7 +20,11 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const user = await getCurrentUser();
-  if (!user) return apiError("UNAUTHORIZED", "Sign in to accept this invitation.", 401);
+  if (!user) {
+    const response = apiError("UNAUTHORIZED", "Sign in to accept this invitation.", 401);
+    response.headers.set("Cache-Control", "no-store");
+    return response;
+  }
 
   const { token } = await params;
   const result = await client.execute({

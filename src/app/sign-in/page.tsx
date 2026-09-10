@@ -1,38 +1,61 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Mail, MapPin } from "lucide-react";
+import { safeReturnTo } from "@/app/join/join-flow";
 
 function SignInContent() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [message, setMessage] = useState("");
+  const next = safeReturnTo(searchParams.get("next"));
+
+  useEffect(() => {
+    const requestedNext = searchParams.get("next");
+    if (requestedNext === next) return;
+    const cleanUrl = next === "/" ? "/sign-in" : `/sign-in?next=${encodeURIComponent(next)}`;
+    window.history.replaceState(null, "", cleanUrl);
+  }, [next, searchParams]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setStatus("sending");
     setMessage("");
-    const response = await fetch("/api/v1/auth/magic-link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, returnTo: searchParams.get("next") || "/" }),
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
+    try {
+      const response = await fetch("/api/v1/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        body: JSON.stringify({ email, returnTo: next }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setStatus("error");
+        setMessage(payload?.error?.message || "The sign-in email could not be sent.");
+        return;
+      }
+      setStatus("sent");
+      setMessage(next === "/join/resume"
+        ? "Check your email on any device. We’ll return you to this invitation."
+        : "Check your inbox. The one-time link expires in 15 minutes.");
+    } catch {
       setStatus("error");
-      setMessage(payload?.error?.message || "The sign-in email could not be sent.");
-      return;
+      setMessage("We couldn’t request a sign-in link. Check your connection and try again.");
     }
-    setStatus("sent");
-    setMessage("Check your inbox. The one-time link expires in 15 minutes.");
+  };
+
+  const changeEmail = () => {
+    setStatus("idle");
+    setMessage("");
   };
 
   return (
-    <main className="grid min-h-dvh place-items-center bg-cream-50 px-5 py-12">
-      <section className="w-full max-w-md border border-ink-900/20 bg-[#fffaf1] p-7 shadow-pop sm:p-10">
+    <main className="grid min-h-dvh min-w-0 place-items-center bg-cream-50 px-5 py-12">
+      <section className="min-w-0 w-full max-w-md border border-ink-900/20 bg-[#fffaf1] p-7 shadow-pop sm:p-10">
         <Link href="/" className="flex w-fit items-center gap-3" aria-label="Hangtime home">
           <span className="relative grid h-10 w-10 place-items-center text-terra-700">
             <MapPin className="h-9 w-9" aria-hidden="true" />
@@ -67,12 +90,18 @@ function SignInContent() {
           </div>
           <button
             type="submit"
-            disabled={status === "sending" || status === "sent"}
+            disabled={status === "sending"}
             className="mt-4 min-h-12 w-full border border-terra-800 bg-terra-600 px-5 py-3 font-bold text-white shadow-[4px_4px_0_#6d291b] transition hover:bg-terra-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === "sending" ? "Sending…" : status === "sent" ? "Email sent" : "Email me a sign-in link"}
+            {status === "sending" ? "Sending…" : status === "sent" ? "Send again" : "Email me a sign-in link"}
           </button>
         </form>
+
+        {status === "sent" && (
+          <button type="button" onClick={changeEmail} className="mt-3 min-h-11 w-full border border-ink-900/25 px-5 py-3 text-sm font-bold text-ink-700 hover:bg-cream-100">
+            Change email address
+          </button>
+        )}
 
         {message && (
           <p
@@ -83,7 +112,7 @@ function SignInContent() {
           </p>
         )}
         <p className="mt-7 text-xs leading-5 text-ink-500">
-          For your security, each link works once. Hangtime never puts your precise location in sign-in emails.
+          For your security, each link works once. Hangtime never puts your precise location or invitation token in sign-in emails.
         </p>
       </section>
     </main>

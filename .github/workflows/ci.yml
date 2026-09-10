@@ -21,6 +21,7 @@ env:
 
 jobs:
   quality:
+    if: vars.HOSTED_CI_ENABLED == 'true'
     name: Lint, types, tests, build, privacy contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -52,6 +53,7 @@ jobs:
         run: pnpm db:seed && pnpm verify:location-encryption
 
   browser-uat:
+    if: vars.HOSTED_CI_ENABLED == 'true'
     name: Hermetic desktop and mobile UAT
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -67,6 +69,7 @@ jobs:
       - run: pnpm ci:browser
 
   production-shell:
+    if: vars.HOSTED_CI_ENABLED == 'true'
     name: Production PWA and security policy
     runs-on: ubuntu-24.04
     timeout-minutes: 20

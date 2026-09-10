@@ -23,6 +23,8 @@ Iteration 3 is deployed at commit `13e01c559daa1fbe6b11c0d16057f7db54ae18d5` (de
 
 Notification preferences and a `notification_outbox` table are present as product seams, but a delivery worker/API for plan invitations, confirmation, reminders, and Web Push is not currently verified. The source of truth is the in-app plan state. A confirmation action must not be reported as an email or push delivery until DT-011 has direct delivery evidence. Authentication email is the only currently implemented transactional email path when Resend is configured.
 
+Iteration 4 is an approved implementation contract, not current production evidence. It adds migration 0007 and an opaque invitation continuation: the raw token is submitted once in strict same-origin JSON, only a short-lived hashed random handle is stored, magic links carry the pending invite server-side, and the rotated session carries that invite across devices. The dated UAT results must not be updated to a pass until the migration, local/browser suites, deployed smoke, and authenticated journey are actually rerun.
+
 ## 2. Product promise and experience principles
 
 Hangtime turns a small group’s chat-thread indecision into a trusted shared commitment:
@@ -208,6 +210,53 @@ Priority is attached to the stable story ID so that a release report can disting
 
 **Edge cases:** participant removes location; calendar connection fails; strict rule added after voting; two tabs change readiness; organizer is the incomplete participant.  
 **Coverage:** Automated in source — `tests/unit/readiness-invalidation.test.ts`, `tests/unit/plan-mutations.test.ts`, `tests/e2e/readiness-ui.spec.ts`, and `tests/e2e/api-acceptance.spec.ts` cover required evidence, deliberate readiness, invalidation, and stale-write rejection. Production Turso 0006 postconditions and one production smoke pass are recorded; the deployed authenticated journey and backup/restore remain run-level pre-release evidence gates.
+
+## Iteration 4 epic HT-E9 — Opaque invitation continuation and authenticated resume
+
+Iteration 4 preserves the current bound-seat authorization model while removing the raw invite token from the post-link authentication continuation. All stories below are contract requirements for the 0007 implementation and are intentionally separate from the completed Iteration 3 evidence.
+
+### Feature HT-F9.1 — Start a private continuation
+
+#### Story HT-US-901 — Start sign-in without leaking my invitation
+
+**As an** invited diner, **I want** to request sign-in from my invitation without placing the bearer token in another URL or cookie, **so that** browser history, referrers, logs, and copied diagnostics do not become alternate acceptance paths.
+
+**Acceptance**
+
+- **Given** `/join/<token>` loads, **when** the page starts the continuation request, **then** it scrubs the raw token from the visible URL/history before any navigation and sends it only in a strict JSON body to `POST /api/v1/invites/continuation`.
+- **Given** the continuation request is valid, invalid, expired, revoked, or superseded, **when** the response is observed, **then** it is generic, `no-store`, contains no token/invite/plan/email data, and does not permit validity enumeration.
+- **Given** a valid request, **when** the server persists state, **then** only a keyed hash of a random short-lived handle is stored and the `__Host-` HttpOnly `SameSite=Lax` cookie has `Secure`, `Path=/`, no `Domain`, and a bounded lifetime.
+- **Given** a cross-origin, non-JSON, oversized, replayed, or rate-limited request, **when** it arrives, **then** it is rejected without creating or consuming a seat, continuation, magic link, or session.
+- **HT-TC-901-EMAIL-RETURN**: **Given** an unbound magic-link request contains any return path other than exact `/` or `/join/resume`, **when** its email is constructed, **then** the destination is home and no submitted query, fragment, encoded path, or invitation-token canary appears in the email URL. A server-bound invitation always resumes at `/join/resume`, even if the submitted return path is hostile. This deliberate restriction also sends ordinary unbound deep-link sign-ins home.
+
+### Feature HT-F9.2 — Bind email and session to one pending invite
+
+#### Story HT-US-902 — Resume the intended invitation after sign-in
+
+**As an** invited diner, **I want** my successful email verification to resume the exact invitation I opened, **so that** a wrong account or another tab cannot attach me to another plan.
+
+**Acceptance**
+
+- **Given** a continuation cookie and email are submitted, **when** the magic-link request runs, **then** intended-email validation and insertion of `continuation_id` occur without consuming the continuation; wrong-email attempts and delivery failure do not strand it.
+- **Given** a magic-link token is verified successfully, **when** the verification transaction commits, **then** it consumes the one-use link, claims the continuation atomically, and transfers its invite ID to the newly rotated session as `pending_invite_id`.
+- **Given** a magic link was already issued, **when** it is opened on another device without the continuation cookie, **then** the one-use link can still verify and create a session carrying its server-bound pending invite.
+- **Given** the magic link is invalid, expired, reused, revoked, superseded, or for another account, **when** it is verified, **then** no invite pointer is installed and no private plan existence/details are disclosed.
+- **Given** the `/join/resume` page is opened while authenticated, **when** it calls `GET /api/v1/invites/resume`, **then** the session-bound invite is revalidated and only safe metadata is returned with `no-store`; unauthenticated or wrong-account requests fail safely.
+- **Given** an invite pointer exists on a session, **when** participation is submitted, **then** the session-bound invite is authoritative; a raw body cannot override it, and the successful claim clears `pending_invite_id` transactionally.
+
+### Feature HT-F9.3 — Preserve compatibility and recover safely
+
+#### Story HT-US-903 — Recover from scanners, races, migration, and offline state
+
+**As a** product operator, **I want** the continuation rollout to preserve legacy rows and fail safely, **so that** scanners, concurrent tabs, deploy rollback, and mobile/offline recovery cannot consume seats or leak tokens.
+
+**Acceptance**
+
+- **Given** a link scanner or prefetcher performs `GET`, **when** it touches join/resume/verify pages, **then** no continuation, magic link, invite, session, or seat is consumed.
+- **Given** two continuation requests, two magic-link requests, two verifications, or two final-seat accepts race, **when** they commit, **then** each one-use state transition succeeds at most once and capacity never exceeds the plan limit.
+- **Given** a legacy deployment has no session-bound invite, **when** participation uses the compatibility path, **then** only the bounded raw-body fallback can run; it is rate-limited, intended-account-bound, and removed after all 0007 deployments and maximum TTLs expire.
+- **Given** migration 0007 is applied, rerun, interrupted, rolled back in code, or presented with an unexpected schema, **then** rows are preserved, the migration is idempotent/fail-closed, and no destructive repair or partial code-before-schema deployment is allowed.
+- **Given** a 320px viewport, keyboard navigation, offline transition, stale/revoked invite, or missing cookie, **when** recovery renders, **then** the user receives readable safe copy, focusable retry/reopen/reissue actions, no horizontal overflow, and no false acceptance success.
 
 ## 8. Epic HT-E4 — Explainable Singapore shortlist
 
@@ -507,6 +556,25 @@ Priority is attached to the stable story ID so that a release report can disting
 
 **Pass outcome:** access fails closed, retries do not duplicate state, list voting remains usable without the map, and the offline shell contains no plan data.
 
+## Iteration 4 detailed UAT and test-case matrix
+
+The matrix distinguishes automated proof from evidence that must be captured against the deployed revision. A passing local test is not a deployed-authentication pass; migration and rollout cases require the 0007 schema to exist before the new route code is promoted.
+
+| Case | Scenario and oracle | Automated evidence | Manual/deployed evidence |
+|---|---|---|---|
+| I4-A01 | Raw token is absent from sign-in and email URLs; join URL/history is scrubbed before navigation; no token appears in referrers, logs, analytics, errors, caches, or response bodies. | Browser route/history assertions; request interception; log/artifact redaction test. | Deployed browser/network inspection across immutable URL and alias; email-render inspection without placing secrets in artifacts. |
+| I4-A02 | Continuation accepts only strict JSON body, exact same-origin requests, bounded token length, and no state-changing GET; all responses are `no-store`. | Route unit/integration matrix for origin, content type, schema, headers, and GET rejection. | Production smoke with same-origin and cross-origin probes; header capture. |
+| I4-A03 | Valid/invalid/expired/revoked/wrong-email continuation requests have generic status/body policy and do not reveal plan existence or intended email. | Disposable DB/API enumeration and response-shape tests; per-client/email/handle rate-limit tests. | Deployed abuse probe with synthetic identities and no raw token recording. |
+| I4-A04 | Two tabs/browser retries create at most one active pre-email continuation per browser/invite; handle hashes, not raw handles, are persisted. | Disposable DB uniqueness/cleanup tests; concurrent continuation requests; schema projection assertions. | Production Turso read-only schema/privacy check. |
+| I4-A05 | Link-scanner/prefetch `GET` does not consume continuation, magic link, invite, session, or seat; only explicit POST/PUT consumes. | Playwright GET/HEAD probes followed by one explicit flow; consumed-state assertions. | Deployed scanner-like GET sequence and subsequent valid acceptance. |
+| I4-A06 | Concurrent magic-link issuance validates/binds without consuming the continuation; delivery failure and wrong-email attempts leave it retryable, while concurrent verification consumes the link/continuation at most once and only one rotated session receives the pending invite pointer. | Disposable DB transaction races, delivery-failure retry, and session rotation tests. | Deployed repeated-click, failed-delivery retry, and multi-device verification with disposable accounts. |
+| I4-A07 | Wrong-account login, cross-plan handle mismatch, stale session pointer, revoked/reissued invite, and expired invite return safe recovery without plan metadata. | Authz matrix and stale/revoked/superseded fixture tests; no-private-data assertions. | Deployed wrong-account and reissue/revoke smoke with synthetic accounts. |
+| I4-A08 | Issued magic link verifies on a second device without the pre-email cookie; no email-only fallback selects another pending invite. | Two-client integration test with cookie omitted on verification; invite-ID equality assertions. | Deployed cross-device flow using disposable mailbox identities. |
+| I4-A09 | The `/join/resume` page calls `GET /api/v1/invites/resume` and exposes a safe preview only after authentication; the API revalidates plan/invite state, while acceptance prioritizes the session pointer and rejects body override. | Route integration and participation precedence tests. | Deployed resume/acceptance journey and response projection review. |
+| I4-A10 | Successful acceptance clears `pending_invite_id` atomically; replay, sign-out, expiry, revocation, and failed rollback leave no usable stale pointer or overbooked seat. | Transaction rollback/replay/capacity race tests; session cleanup tests. | Deployed final-seat and post-accept replay smoke. |
+| I4-A11 | Migration 0007 runs before code use, is idempotent, preserves legacy auth/invite rows, fails closed on incompatible schema, and supports code rollback without destructive rollback SQL. | Disposable old/new schema migration, interruption, rerun, rollback-order, and preservation tests. | Isolated Turso migration verifier and deployment-order evidence; no production destructive migration. |
+| I4-A12 | Offline/missing-cookie/reopen/reissue recovery is honest and usable at 320px with keyboard focus and no horizontal overflow. | Playwright offline/route-error tests, axe, keyboard, 320px assertions. | Desktop/mobile deployed render; physical iOS/Android remains a manual gate. |
+
 ## 14. Traceability matrix
 
 The matrix separates evidence that exists in the repository from evidence that must be captured by a human or added to automation. A named test is not a claim that the latest run passed; the run record in Section 15 supplies the date, SHA, environment, and result.
@@ -515,6 +583,7 @@ The matrix separates evidence that exists in the repository from evidence that m
 |---|---|---|---|---|
 | Two or three participants and deliberate companion selection | HT-US-202, HT-US-203, HT-US-301 | `tests/e2e/adversarial-user-flows.spec.ts`; `tests/e2e/full-journey.spec.ts`; `tests/unit/auth-security.test.ts` | Three independent sessions creating one plan; direct `/plans/new` intent and stale relationship review | Concurrent capacity and complete three-actor journey — DT-003/DT-009 |
 | Production identity and authorization | HT-US-301, HT-US-801 | `tests/unit/production-auth.test.ts`; `tests/unit/auth-security.test.ts`; adversarial outsider browser flow | Real Resend sign-in, expiry/replay, revoked session, and account-owned Vercel evidence | Live email delivery and remote deployment — DT-001/DT-014 |
+| Opaque invitation continuation and authenticated resume | HT-US-901, HT-US-902, HT-US-903 | Iteration 4 cases I4-A01–I4-A12; continuation/migration/session/race/URL-scrub/privacy/accessibility suites | Deployed immutable/alias smoke, cross-device mailbox flow, scanner-like GETs, wrong-account privacy, and 0007 Turso verifier | Migration/code ordering, authenticated deployed E2E, and raw-body fallback retirement — DT-015–DT-018 |
 | Profile, companion, dietary, and preference privacy | HT-US-201, HT-US-202, HT-US-302, HT-US-806 | Profile/companion journey coverage; `tests/unit/dietary-rules.test.ts`; location field redaction in `tests/unit/auth-security.test.ts` | Screen review of deliberate selection, consent/removal, privacy copy, and persisted preferences | Concurrent edits, full companion lifecycle, and notification preference semantics — DT-012/DT-011 |
 | General-area privacy and encrypted precise origins | HT-US-302, HT-US-402, HT-US-501, HT-US-802 | `tests/unit/location-encryption.test.ts`; `tests/unit/location-migration.test.ts`; `tests/unit/readiness-invalidation.test.ts`; `tests/unit/open-map.test.ts`; disposable `pnpm verify:location-encryption` pass over 8 encrypted rows | Deployed Turso database/dump, backups, browser/network/log canary scan and key-rotation/restore drill | Remote migration, account-owned backup/restore, and external evidence — DT-002/DT-014 |
 | Scheduling, timezone, and availability | HT-US-203, HT-US-302, HT-US-601 | `tests/unit/state-machine.test.ts`; `tests/unit/readiness-invalidation.test.ts`; `tests/e2e/readiness-ui.spec.ts`; plan validation in `tests/e2e/adversarial-user-flows.spec.ts` | Asia/Singapore boundary around midnight, calendar denial/fallback, and two-tab review | Calendar OAuth/free/busy and deployed authenticated evidence — external/manual gate |

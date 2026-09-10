@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { initDatabase } from "@/lib/db/init";
 import {
   applyIncrementalMigrations,
+  AUTH_INVITE_CONTINUATIONS_MIGRATION,
+  AUTH_INVITE_CONTINUATION_INDEX_NAMES,
   PENDING_SEAT_RESERVATIONS_MIGRATION,
   READINESS_INTEGRITY_MIGRATION,
 } from "@/lib/db/migrations";
@@ -90,6 +92,15 @@ async function createLegacyDatabase() {
     CREATE TABLE ballots (id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, run_id TEXT NOT NULL, user_id TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE recommendation_runs (id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, plan_version INTEGER NOT NULL);
     CREATE TABLE plan_decisions (id TEXT PRIMARY KEY, plan_id TEXT NOT NULL);
+    CREATE TABLE auth_magic_links (
+      id TEXT PRIMARY KEY, email_normalized TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL, consumed_at TEXT, delivery_status TEXT NOT NULL DEFAULT 'pending',
+      provider_message_id TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE auth_sessions (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
+    );
     CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
   `);
   return { db, directory };
@@ -122,9 +133,19 @@ describe("incremental database migrations", () => {
         args: [PENDING_SEAT_RESERVATIONS_MIGRATION],
       });
       expect(reservationMigration.rows).toHaveLength(1);
+      const continuationMigration = await db.execute({
+        sql: "SELECT 1 FROM schema_migrations WHERE version = ?",
+        args: [AUTH_INVITE_CONTINUATIONS_MIGRATION],
+      });
+      expect(continuationMigration.rows).toHaveLength(1);
+      expect((await db.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'auth_invite_continuations'")).rows).toHaveLength(1);
+      expect((await db.execute("PRAGMA table_info(auth_magic_links)")).rows.map((row) => String(row.name))).toContain("continuation_id");
+      expect((await db.execute("PRAGMA table_info(auth_sessions)")).rows.map((row) => String(row.name))).toContain("pending_invite_id");
       const indexes = await indexNames(db);
       for (const indexName of INDEX_NAMES) expect(indexes.has(indexName)).toBe(true);
       for (const indexName of INVITE_INDEX_NAMES) expect(indexes.has(indexName)).toBe(true);
+      const continuationIndexes = await indexNames(db);
+      for (const indexName of AUTH_INVITE_CONTINUATION_INDEX_NAMES) expect(continuationIndexes.has(indexName)).toBe(true);
     } finally {
       db.close();
     }
@@ -150,6 +171,18 @@ describe("incremental database migrations", () => {
           "user_1",
           "2026-08-22T00:00:00.000Z",
         ],
+      });
+      await db.execute({
+        sql: `INSERT INTO auth_magic_links
+          (id, email_normalized, token_hash, expires_at, consumed_at, delivery_status, provider_message_id, created_at)
+        VALUES (?, ?, ?, ?, NULL, 'sent', ?, ?)`,
+        args: ["auth_link_legacy", "legacy@example.com", "legacy-link-hash", "2026-08-25T00:00:00.000Z", "provider-1", "2026-08-22T00:00:00.000Z"],
+      });
+      await db.execute({
+        sql: `INSERT INTO auth_sessions
+          (id, user_id, token_hash, expires_at, revoked_at, created_at, last_seen_at)
+        VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+        args: ["auth_session_legacy", "legacy-user", "legacy-session-hash", "2026-08-25T00:00:00.000Z", "2026-08-22T00:00:00.000Z", "2026-08-22T00:00:00.000Z"],
       });
       await db.execute({
         sql: `INSERT INTO plan_invites
@@ -205,6 +238,10 @@ describe("incremental database migrations", () => {
           superseded_by_invite_id: null,
         }),
       ]);
+      expect((await db.execute("SELECT email_normalized, token_hash, continuation_id FROM auth_magic_links WHERE id = 'auth_link_legacy'")).rows[0])
+        .toMatchObject({ email_normalized: "legacy@example.com", token_hash: "legacy-link-hash", continuation_id: null });
+      expect((await db.execute("SELECT user_id, token_hash, pending_invite_id FROM auth_sessions WHERE id = 'auth_session_legacy'")).rows[0])
+        .toMatchObject({ user_id: "legacy-user", token_hash: "legacy-session-hash", pending_invite_id: null });
       await expect(countPlanSeats(db, "plan_1", "2026-08-22T02:00:00.000Z")).resolves.toEqual({
         activeParticipants: 0,
         liveReservations: 0,

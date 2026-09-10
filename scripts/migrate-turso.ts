@@ -1,9 +1,12 @@
 import { createClient } from "@libsql/client";
 import { initDatabase } from "../src/lib/db/init";
 import {
+  AUTH_INVITE_CONTINUATIONS_MIGRATION,
+  AUTH_INVITE_CONTINUATION_INDEX_NAMES,
   PENDING_INVITE_COLUMNS,
   PENDING_INVITE_INDEX_NAMES,
   PENDING_SEAT_RESERVATIONS_MIGRATION,
+  READINESS_INTEGRITY_MIGRATION,
 } from "../src/lib/db/migrations";
 import { getLocationKeyring } from "../src/lib/location/keyring";
 
@@ -42,7 +45,7 @@ try {
   }
   const integrityMigration = await client.execute({
     sql: "SELECT 1 FROM schema_migrations WHERE version = ?",
-    args: ["0005_readiness_and_plan_integrity"],
+    args: [READINESS_INTEGRITY_MIGRATION],
   });
   if (integrityMigration.rows.length !== 1) {
     throw new Error("Remote migration is incomplete: readiness integrity migration was not recorded");
@@ -53,6 +56,38 @@ try {
   });
   if (reservationMigration.rows.length !== 1) {
     throw new Error("Remote migration is incomplete: pending seat reservation migration was not recorded");
+  }
+  const continuationMigration = await client.execute({
+    sql: "SELECT 1 FROM schema_migrations WHERE version = ?",
+    args: [AUTH_INVITE_CONTINUATIONS_MIGRATION],
+  });
+  if (continuationMigration.rows.length !== 1) {
+    throw new Error("Remote migration is incomplete: invite continuation migration was not recorded");
+  }
+  const continuationTables = new Set((await client.execute(
+    "SELECT name FROM sqlite_master WHERE type = 'table'",
+  )).rows.map((row) => String(row.name)));
+  if (!continuationTables.has("auth_invite_continuations")) {
+    throw new Error("Remote migration is incomplete: auth_invite_continuations is missing");
+  }
+  const magicLinkColumns = new Set((await client.execute(
+    "PRAGMA table_info(auth_magic_links)",
+  )).rows.map((row) => String(row.name)));
+  if (!magicLinkColumns.has("continuation_id")) {
+    throw new Error("Remote migration is incomplete: auth_magic_links.continuation_id is missing");
+  }
+  const sessionColumns = new Set((await client.execute(
+    "PRAGMA table_info(auth_sessions)",
+  )).rows.map((row) => String(row.name)));
+  if (!sessionColumns.has("pending_invite_id")) {
+    throw new Error("Remote migration is incomplete: auth_sessions.pending_invite_id is missing");
+  }
+  const continuationIndexes = new Set((await client.execute(
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'auth_invite_continuations'",
+  )).rows.map((row) => String(row.name)));
+  const missingContinuationIndexes = AUTH_INVITE_CONTINUATION_INDEX_NAMES.filter((name) => !continuationIndexes.has(name));
+  if (missingContinuationIndexes.length > 0) {
+    throw new Error(`Remote migration is incomplete: continuation indexes missing: ${missingContinuationIndexes.join(", ")}`);
   }
   const inviteColumns = new Set((await client.execute(
     "PRAGMA table_info(plan_invites)",

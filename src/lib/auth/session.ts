@@ -10,9 +10,38 @@ import {
   verifyDemoSessionToken,
 } from "./demo-session";
 import {
+  productionSessionContext,
   productionSessionUserId,
   sessionCookieName,
 } from "./production-session";
+
+export type AuthenticatedSessionContext = {
+  sessionId: string | null;
+  userId: string;
+  pendingInviteId: string | null;
+};
+
+export async function getCurrentSessionContext(): Promise<AuthenticatedSessionContext | null> {
+  const cookieStore = await cookies();
+  const productionToken = cookieStore.get(sessionCookieName())?.value;
+  if (productionToken) {
+    const context = await productionSessionContext(productionToken);
+    if (context) return context;
+  }
+
+  if (isDevelopmentDemoMode()) {
+    const demoToken = cookieStore.get(DEMO_SESSION_COOKIE_NAME)?.value;
+    const secret = getDemoSessionSecret();
+    if (demoToken && secret) {
+      const userId = verifyDemoSessionToken(demoToken, secret);
+      return userId ? { sessionId: null, userId, pendingInviteId: null } : null;
+    }
+    if (!demoToken) {
+      return { sessionId: null, userId: DEFAULT_DEMO_USER_ID, pendingInviteId: null };
+    }
+  }
+  return null;
+}
 
 export async function getCurrentUserId(): Promise<string | null> {
   const cookieStore = await cookies();

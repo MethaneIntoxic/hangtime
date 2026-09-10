@@ -253,6 +253,7 @@ export async function initDatabase(
       consumed_at TEXT,
       delivery_status TEXT NOT NULL DEFAULT 'pending',
       provider_message_id TEXT,
+      continuation_id TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -261,6 +262,22 @@ export async function initDatabase(
     CREATE INDEX IF NOT EXISTS auth_magic_links_expires_idx
       ON auth_magic_links(expires_at);
 
+    CREATE TABLE IF NOT EXISTS auth_invite_continuations (
+      id TEXT PRIMARY KEY,
+      handle_hash TEXT NOT NULL UNIQUE,
+      invite_id TEXT NOT NULL,
+      intended_email_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT,
+      revoked_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS auth_invite_continuations_invite_status_idx
+      ON auth_invite_continuations(invite_id, consumed_at, revoked_at, expires_at);
+    CREATE INDEX IF NOT EXISTS auth_invite_continuations_expiry_idx
+      ON auth_invite_continuations(expires_at);
+
     CREATE TABLE IF NOT EXISTS auth_sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -268,7 +285,8 @@ export async function initDatabase(
       expires_at TEXT NOT NULL,
       revoked_at TEXT,
       created_at TEXT NOT NULL,
-      last_seen_at TEXT NOT NULL
+      last_seen_at TEXT NOT NULL,
+      pending_invite_id TEXT
     );
 
     CREATE INDEX IF NOT EXISTS auth_sessions_user_idx

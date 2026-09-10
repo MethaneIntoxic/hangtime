@@ -14,6 +14,9 @@
 - [ ] Configure matching, environment-scoped Vercel variables; mark secrets Sensitive.
 - [ ] Confirm Preview and Production database URLs, tokens, keyrings, auth secrets, and email identities differ.
 - [ ] Confirm no production secret is available to pull-request workflows.
+- [ ] Leave `HOSTED_CI_ENABLED` unset unless an intentional GitHub-hosted
+      runner validation window is open; set it to the literal `true` only for
+      that window, then unset it.
 - [ ] Leave `FREE_TIER_DEPLOYMENTS_ENABLED` unset unless an intentional
       free-tier release window is open; set it to `true` only for that window.
 - [ ] Confirm no GitHub Actions schedule is enabled and that manual health
@@ -23,6 +26,8 @@
 
 - [ ] Run `pnpm ci:fast` and `pnpm ci:security` locally on the exact main SHA;
       retain the workflow URL only if hosted Actions actually starts a runner.
+- [ ] If hosted evidence is intentionally required, confirm account minutes
+      and spending controls, then set `HOSTED_CI_ENABLED=true` before dispatch.
 - [ ] If Actions is blocked before runner start by account billing/spending
       restrictions, record remote validation as not executed; do not change
       billing settings or claim the local result as remote evidence.

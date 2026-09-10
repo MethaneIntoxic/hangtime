@@ -6,8 +6,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hangtime-deployment-smoke
+  cancel-in-progress: true
+
 jobs:
   smoke:
+    if: vars.HOSTED_CI_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
